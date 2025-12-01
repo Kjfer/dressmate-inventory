@@ -6,6 +6,7 @@ import {
   ShoppingCart,
   Truck,
   Users,
+  Search,
 } from "lucide-react";
 
 import {
@@ -22,6 +23,7 @@ import {
 
 const menuItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Buscar", url: "/buscar", icon: Search },
   { title: "Productos", url: "/productos", icon: Package },
   { title: "Pedidos", url: "/pedidos", icon: ShoppingCart },
   { title: "Viajes", url: "/viajes", icon: Truck },
