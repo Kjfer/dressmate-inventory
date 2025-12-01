@@ -12,6 +12,7 @@ import CreateOrder from "./pages/CreateOrder";
 import OrderDetail from "./pages/OrderDetail";
 import Trips from "./pages/Trips";
 import Motorized from "./pages/Motorized";
+import Search from "./pages/Search";
 import Install from "./pages/Install";
 import NotFound from "./pages/NotFound";
 
@@ -85,6 +86,14 @@ const App = () => (
             element={
               <Layout>
                 <Motorized />
+              </Layout>
+            }
+          />
+          <Route
+            path="/buscar"
+            element={
+              <Layout>
+                <Search />
               </Layout>
             }
           />
