@@ -11,9 +11,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, FileDown, Truck, CheckCircle } from "lucide-react";
+import { ArrowLeft, FileDown, Truck, CheckCircle, Camera } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { QRScanner } from "@/components/QRScanner";
 
 const mockOrderDetails = {
   id: "PED-001",
@@ -30,6 +31,7 @@ const mockOrderDetails = {
       talla: "M",
       cantidadSolicitada: 2,
       asignados: 1,
+      qrCodes: [""],
     },
     {
       id: 2,
@@ -38,6 +40,7 @@ const mockOrderDetails = {
       talla: "L",
       cantidadSolicitada: 1,
       asignados: 0,
+      qrCodes: [""],
     },
   ],
 };
@@ -46,7 +49,8 @@ const OrderDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [order] = useState(mockOrderDetails);
+  const [order, setOrder] = useState(mockOrderDetails);
+  const [scanningForItem, setScanningForItem] = useState<number | null>(null);
 
   const handleMarkAsReady = () => {
     toast({
@@ -63,14 +67,55 @@ const OrderDetail = () => {
     navigate("/pedidos");
   };
 
+  const handleQRScan = (decodedText: string, itemId: number) => {
+    setOrder((prev) => ({
+      ...prev,
+      items: prev.items.map((item) => {
+        if (item.id === itemId) {
+          return {
+            ...item,
+            asignados: Math.min(item.asignados + 1, item.cantidadSolicitada),
+            qrCodes: [...item.qrCodes, decodedText],
+          };
+        }
+        return item;
+      }),
+    }));
+
+    toast({
+      title: "Vestido Asignado",
+      description: `Código QR escaneado: ${decodedText}`,
+    });
+
+    setScanningForItem(null);
+  };
+
   const getItemStatus = (asignados: number, solicitados: number) => {
-    if (asignados === 0) return { text: "Pendiente", color: "bg-warning/10 text-warning border-warning/20" };
-    if (asignados < solicitados) return { text: "Parcial", color: "bg-primary/10 text-primary border-primary/20" };
-    return { text: "Asignado", color: "bg-success/10 text-success border-success/20" };
+    if (asignados === 0)
+      return {
+        text: "Pendiente",
+        color: "bg-warning/10 text-warning border-warning/20",
+      };
+    if (asignados < solicitados)
+      return {
+        text: "Parcial",
+        color: "bg-primary/10 text-primary border-primary/20",
+      };
+    return {
+      text: "Asignado",
+      color: "bg-success/10 text-success border-success/20",
+    };
   };
 
   return (
     <div className="space-y-6">
+      {scanningForItem !== null && (
+        <QRScanner
+          onScan={(code) => handleQRScan(code, scanningForItem)}
+          onClose={() => setScanningForItem(null)}
+        />
+      )}
+
       <div className="flex justify-between items-center">
         <div>
           <Button
@@ -118,7 +163,10 @@ const OrderDetail = () => {
             <CardTitle>Estado del Pedido</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20">
+            <Badge
+              variant="outline"
+              className="bg-warning/10 text-warning border-warning/20"
+            >
               {order.estado}
             </Badge>
             <div className="space-y-2">
@@ -157,12 +205,15 @@ const OrderDetail = () => {
                 <TableHead>Solicitados</TableHead>
                 <TableHead>Asignados</TableHead>
                 <TableHead>Estado</TableHead>
-                <TableHead>Escanear QR</TableHead>
+                <TableHead>Acción</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {order.items.map((item) => {
-                const status = getItemStatus(item.asignados, item.cantidadSolicitada);
+                const status = getItemStatus(
+                  item.asignados,
+                  item.cantidadSolicitada
+                );
                 return (
                   <TableRow key={item.id}>
                     <TableCell className="font-medium">{item.imei}</TableCell>
@@ -178,10 +229,19 @@ const OrderDetail = () => {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Input
-                        placeholder="Escanear o escribir código..."
-                        className="w-48"
-                      />
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setScanningForItem(item.id)}
+                          disabled={
+                            item.asignados >= item.cantidadSolicitada
+                          }
+                        >
+                          <Camera className="h-4 w-4 mr-1" />
+                          Escanear QR
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
