@@ -11,6 +11,7 @@ import Orders from "./pages/Orders";
 import CreateOrder from "./pages/CreateOrder";
 import OrderDetail from "./pages/OrderDetail";
 import Trips from "./pages/Trips";
+import TripDetail from "./pages/TripDetail";
 import Motorized from "./pages/Motorized";
 import Search from "./pages/Search";
 import Install from "./pages/Install";
@@ -78,6 +79,14 @@ const App = () => (
             element={
               <Layout>
                 <Trips />
+              </Layout>
+            }
+          />
+          <Route
+            path="/viajes/:id"
+            element={
+              <Layout>
+                <TripDetail />
               </Layout>
             }
           />
