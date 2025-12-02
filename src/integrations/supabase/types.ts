@@ -422,7 +422,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      assign_dress_unit_by_qr: {
+        Args: { p_order_id: string; p_qr_code: string }
+        Returns: Json
+      }
     }
     Enums: {
       dress_unit_status:
