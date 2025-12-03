@@ -7,7 +7,9 @@ import {
   Truck,
   Users,
   Search,
+  LucideIcon,
 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 import {
   Sidebar,
@@ -21,21 +23,36 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
-const menuItems = [
+interface MenuItem {
+  title: string;
+  url: string;
+  icon: LucideIcon;
+  requireAdmin?: boolean;
+  requireOrdersAccess?: boolean;
+}
+
+const menuItems: MenuItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Buscar", url: "/buscar", icon: Search },
   { title: "Productos", url: "/productos", icon: Package },
   { title: "Pedidos", url: "/pedidos", icon: ShoppingCart },
   { title: "Viajes", url: "/viajes", icon: Truck },
-  { title: "Motorizados", url: "/motorizados", icon: Users },
+  { title: "Motorizados", url: "/motorizados", icon: Users, requireAdmin: true },
 ];
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const location = useLocation();
-  const currentPath = location.pathname;
+  const { isAdmin, canManageOrders, role } = useAuth();
 
   const isCollapsed = state === "collapsed";
+
+  // Filter menu items based on role
+  const visibleMenuItems = menuItems.filter(item => {
+    if (item.requireAdmin && !isAdmin) return false;
+    if (item.requireOrdersAccess && !canManageOrders) return false;
+    return true;
+  });
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -56,7 +73,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Menú Principal</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => (
+              {visibleMenuItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink
