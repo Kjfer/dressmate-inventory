@@ -16,59 +16,73 @@ import { useToast } from "@/hooks/use-toast";
 import { QRScanner } from "@/components/QRScanner";
 import { supabase } from "@/integrations/supabase/client";
 
-interface OrderItem {
+interface Variacion {
   id: string;
-  product_id: string;
-  dress_unit_id: string | null;
-  requested_size: string;
-  rental_price: number;
-  notes: string | null;
-  product: {
+  talla: string;
+  producto: {
     id: string;
-    code: string;
-    name: string;
+    imei: string;
+    nombre: string;
   };
-  dress_unit: {
-    id: string;
-    qr_code: string;
-    sku: string;
-  } | null;
 }
 
-interface Order {
+interface ProductoIndividual {
   id: string;
-  order_number: string;
-  status: string;
-  event_date: string;
-  delivery_date: string;
-  return_date: string;
-  delivery_address: string;
-  delivery_district: string | null;
+  qr_code: string;
+  estado: string;
+}
+
+interface Asignacion {
+  id: string;
+  producto_individual: ProductoIndividual;
+}
+
+interface DetallePedido {
+  id: string;
+  variacion_id: string;
+  cantidad: number;
+  precio_unitario: number;
+  notas: string | null;
+  variacion: Variacion;
+  asignaciones: Asignacion[];
+}
+
+interface Pedido {
+  id: string;
+  numero_pedido: string;
+  estado: string;
+  fecha_pedido: string;
+  fecha_evento: string | null;
+  fecha_entrega: string | null;
+  direccion_entrega: string | null;
+  distrito_entrega: string | null;
   total: number;
-  client: {
+  cliente: {
     id: string;
-    full_name: string;
-    phone: string;
-    address: string;
+    nombre: string;
+    telefono: string;
+    direccion: string;
   };
 }
 
 interface GroupedItem {
-  product_id: string;
-  product_code: string;
-  product_name: string;
-  requested_size: string;
-  total_requested: number;
-  assigned_count: number;
-  items: OrderItem[];
+  variacion_id: string;
+  producto_imei: string;
+  producto_nombre: string;
+  talla: string;
+  cantidad_solicitada: number;
+  cantidad_asignada: number;
+  qr_asignados: string[];
 }
+
+type EstadoPedido = 'pendiente' | 'confirmado' | 'alistado' | 'enviado' | 'entregado' | 'cancelado';
 
 const OrderDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [order, setOrder] = useState<Order | null>(null);
-  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [pedido, setPedido] = useState<Pedido | null>(null);
+  const [detalles, setDetalles] = useState<DetallePedido[]>([]);
   const [groupedItems, setGroupedItems] = useState<GroupedItem[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -76,53 +90,42 @@ const OrderDetail = () => {
 
   useEffect(() => {
     if (id) {
-      fetchOrderDetails();
+      fetchPedidoDetails();
     }
   }, [id]);
 
   useEffect(() => {
-    // Group items by product and size
-    const grouped = orderItems.reduce((acc, item) => {
-      const key = `${item.product_id}-${item.requested_size}`;
-      if (!acc[key]) {
-        acc[key] = {
-          product_id: item.product_id,
-          product_code: item.product?.code || '',
-          product_name: item.product?.name || '',
-          requested_size: item.requested_size,
-          total_requested: 0,
-          assigned_count: 0,
-          items: [],
-        };
-      }
-      acc[key].total_requested += 1;
-      if (item.dress_unit_id) {
-        acc[key].assigned_count += 1;
-      }
-      acc[key].items.push(item);
-      return acc;
-    }, {} as Record<string, GroupedItem>);
+    // Group items by variacion
+    const grouped = detalles.map(detalle => ({
+      variacion_id: detalle.variacion_id,
+      producto_imei: detalle.variacion?.producto?.imei || '',
+      producto_nombre: detalle.variacion?.producto?.nombre || '',
+      talla: detalle.variacion?.talla || '',
+      cantidad_solicitada: detalle.cantidad,
+      cantidad_asignada: detalle.asignaciones?.length || 0,
+      qr_asignados: detalle.asignaciones?.map(a => a.producto_individual?.qr_code).filter(Boolean) || [],
+    }));
 
-    setGroupedItems(Object.values(grouped));
-  }, [orderItems]);
+    setGroupedItems(grouped);
+  }, [detalles]);
 
-  const fetchOrderDetails = async () => {
+  const fetchPedidoDetails = async () => {
     try {
       setLoading(true);
       
-      // Fetch order with client
-      const { data: orderData, error: orderError } = await supabase
-        .from('orders')
+      // Fetch pedido with cliente
+      const { data: pedidoData, error: pedidoError } = await supabase
+        .from('pedidos')
         .select(`
           *,
-          client:clients(*)
+          cliente:clientes(*)
         `)
         .eq('id', id)
         .maybeSingle();
 
-      if (orderError) throw orderError;
+      if (pedidoError) throw pedidoError;
       
-      if (!orderData) {
+      if (!pedidoData) {
         toast({
           title: "Pedido no encontrado",
           description: "El pedido solicitado no existe",
@@ -132,22 +135,43 @@ const OrderDetail = () => {
         return;
       }
 
-      setOrder(orderData as Order);
+      setPedido(pedidoData as Pedido);
 
-      // Fetch order items with products and dress units
-      const { data: itemsData, error: itemsError } = await supabase
-        .from('order_items')
+      // Fetch detalle_pedido with variaciones, productos and asignaciones
+      const { data: detallesData, error: detallesError } = await supabase
+        .from('detalle_pedido')
         .select(`
           *,
-          product:products(*),
-          dress_unit:dress_units(*)
+          variacion:variaciones_producto(
+            *,
+            producto:productos(*)
+          )
         `)
-        .eq('order_id', id);
+        .eq('pedido_id', id);
 
-      if (itemsError) throw itemsError;
-      setOrderItems(itemsData as OrderItem[]);
+      if (detallesError) throw detallesError;
+
+      // Fetch asignaciones for each detalle
+      const detallesConAsignaciones = await Promise.all(
+        (detallesData || []).map(async (detalle) => {
+          const { data: asignacionesData } = await supabase
+            .from('asignacion_productos')
+            .select(`
+              *,
+              producto_individual:productos_individuales(*)
+            `)
+            .eq('detalle_pedido_id', detalle.id);
+          
+          return {
+            ...detalle,
+            asignaciones: asignacionesData || [],
+          };
+        })
+      );
+
+      setDetalles(detallesConAsignaciones as DetallePedido[]);
     } catch (error) {
-      console.error('Error fetching order:', error);
+      console.error('Error fetching pedido:', error);
       toast({
         title: "Error",
         description: "No se pudo cargar el pedido",
@@ -159,13 +183,13 @@ const OrderDetail = () => {
   };
 
   const handleQRScan = async (qrCode: string) => {
-    if (!order) return;
+    if (!pedido) return;
     
     setProcessing(true);
     try {
-      const { data, error } = await supabase.rpc('assign_dress_unit_by_qr', {
+      const { data, error } = await supabase.rpc('asignar_producto_por_qr', {
         p_qr_code: qrCode,
-        p_order_id: order.id,
+        p_pedido_id: pedido.id,
       });
 
       if (error) throw error;
@@ -174,41 +198,22 @@ const OrderDetail = () => {
         success: boolean;
         error?: string;
         message?: string;
-        product_name?: string;
-        assigned_count?: number;
-        total_count?: number;
-        is_complete?: boolean;
+        producto_nombre?: string;
+        talla?: string;
+        asignados?: number;
+        solicitados?: number;
+        completo?: boolean;
       };
 
       if (result.success) {
         toast({
           title: "Vestido Asignado",
-          description: `${result.product_name}: ${result.assigned_count}/${result.total_count} ${result.is_complete ? '✓ Completo' : ''}`,
+          description: `${result.producto_nombre} (${result.talla}): ${result.asignados}/${result.solicitados} ${result.completo ? '✓ Completo' : ''}`,
         });
         
-        // Refresh order items
-        await fetchOrderDetails();
+        // Refresh pedido details
+        await fetchPedidoDetails();
         
-        // Keep scanner open if there are more items to assign
-        const hasMoreToAssign = groupedItems.some(
-          g => g.assigned_count < g.total_requested
-        );
-        
-        if (!hasMoreToAssign || result.is_complete) {
-          // Check if all items are complete
-          const allComplete = groupedItems.every(
-            g => g.assigned_count >= g.total_requested || 
-                 (g.product_id === result.product_name && result.is_complete)
-          );
-          
-          if (allComplete) {
-            setIsScanning(false);
-            toast({
-              title: "Pedido Completo",
-              description: "Todos los vestidos han sido asignados",
-            });
-          }
-        }
       } else {
         toast({
           title: "Error al asignar",
@@ -217,7 +222,7 @@ const OrderDetail = () => {
         });
       }
     } catch (error) {
-      console.error('Error assigning dress unit:', error);
+      console.error('Error assigning product:', error);
       toast({
         title: "Error",
         description: "Ocurrió un error al procesar el código QR",
@@ -228,26 +233,24 @@ const OrderDetail = () => {
     }
   };
 
-  type OrderStatus = 'pending' | 'confirmed' | 'in_preparation' | 'ready' | 'delivered' | 'returned' | 'cancelled';
-  
-  const handleUpdateStatus = async (newStatus: OrderStatus) => {
-    if (!order) return;
+  const handleUpdateStatus = async (newStatus: EstadoPedido) => {
+    if (!pedido) return;
     
     try {
       const { error } = await supabase
-        .from('orders')
-        .update({ status: newStatus })
-        .eq('id', order.id);
+        .from('pedidos')
+        .update({ estado: newStatus })
+        .eq('id', pedido.id);
 
       if (error) throw error;
 
-      setOrder({ ...order, status: newStatus });
+      setPedido({ ...pedido, estado: newStatus });
       toast({
         title: "Estado actualizado",
         description: `El pedido ahora está: ${getStatusLabel(newStatus)}`,
       });
 
-      if (newStatus === 'delivered') {
+      if (newStatus === 'entregado') {
         navigate('/pedidos');
       }
     } catch (error) {
@@ -262,26 +265,24 @@ const OrderDetail = () => {
 
   const getStatusLabel = (status: string) => {
     const labels: Record<string, string> = {
-      pending: 'Pendiente',
-      confirmed: 'Confirmado',
-      in_preparation: 'En Preparación',
-      ready: 'Listo para Envío',
-      delivered: 'Entregado',
-      returned: 'Devuelto',
-      cancelled: 'Cancelado',
+      pendiente: 'Pendiente',
+      confirmado: 'Confirmado',
+      alistado: 'Alistado',
+      enviado: 'Enviado',
+      entregado: 'Entregado',
+      cancelado: 'Cancelado',
     };
     return labels[status] || status;
   };
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
-      pending: 'bg-warning/10 text-warning border-warning/20',
-      confirmed: 'bg-primary/10 text-primary border-primary/20',
-      in_preparation: 'bg-primary/10 text-primary border-primary/20',
-      ready: 'bg-success/10 text-success border-success/20',
-      delivered: 'bg-success/10 text-success border-success/20',
-      returned: 'bg-muted text-muted-foreground',
-      cancelled: 'bg-destructive/10 text-destructive border-destructive/20',
+      pendiente: 'bg-warning/10 text-warning border-warning/20',
+      confirmado: 'bg-primary/10 text-primary border-primary/20',
+      alistado: 'bg-primary/10 text-primary border-primary/20',
+      enviado: 'bg-info/10 text-info border-info/20',
+      entregado: 'bg-success/10 text-success border-success/20',
+      cancelado: 'bg-destructive/10 text-destructive border-destructive/20',
     };
     return colors[status] || 'bg-muted';
   };
@@ -292,9 +293,9 @@ const OrderDetail = () => {
     return { text: 'Completo', color: 'bg-success/10 text-success border-success/20' };
   };
 
-  const totalAssigned = groupedItems.reduce((sum, g) => sum + g.assigned_count, 0);
-  const totalRequested = groupedItems.reduce((sum, g) => sum + g.total_requested, 0);
-  const allAssigned = totalAssigned === totalRequested && totalRequested > 0;
+  const totalAsignados = groupedItems.reduce((sum, g) => sum + g.cantidad_asignada, 0);
+  const totalSolicitados = groupedItems.reduce((sum, g) => sum + g.cantidad_solicitada, 0);
+  const todosAsignados = totalAsignados === totalSolicitados && totalSolicitados > 0;
 
   if (loading) {
     return (
@@ -304,7 +305,7 @@ const OrderDetail = () => {
     );
   }
 
-  if (!order) {
+  if (!pedido) {
     return (
       <div className="text-center py-12">
         <p className="text-muted-foreground">Pedido no encontrado</p>
@@ -330,7 +331,7 @@ const OrderDetail = () => {
             <ArrowLeft className="h-4 w-4 mr-2" />
             Volver a Pedidos
           </Button>
-          <h1 className="text-3xl font-bold">Pedido {order.order_number}</h1>
+          <h1 className="text-3xl font-bold">Pedido {pedido.numero_pedido}</h1>
           <p className="text-muted-foreground mt-1">
             Asignar vestidos y preparar para envío
           </p>
@@ -345,23 +346,25 @@ const OrderDetail = () => {
           <CardContent className="space-y-3">
             <div>
               <p className="text-sm text-muted-foreground">Cliente</p>
-              <p className="font-medium">{order.client?.full_name}</p>
+              <p className="font-medium">{pedido.cliente?.nombre}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Teléfono</p>
-              <p className="font-medium">{order.client?.phone}</p>
+              <p className="font-medium">{pedido.cliente?.telefono}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Dirección de Entrega</p>
-              <p className="font-medium">{order.delivery_address}</p>
-              {order.delivery_district && (
-                <p className="text-sm text-muted-foreground">{order.delivery_district}</p>
+              <p className="font-medium">{pedido.direccion_entrega || pedido.cliente?.direccion}</p>
+              {pedido.distrito_entrega && (
+                <p className="text-sm text-muted-foreground">{pedido.distrito_entrega}</p>
               )}
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Fecha del Evento</p>
-              <p className="font-medium">{new Date(order.event_date).toLocaleDateString()}</p>
-            </div>
+            {pedido.fecha_evento && (
+              <div>
+                <p className="text-sm text-muted-foreground">Fecha del Evento</p>
+                <p className="font-medium">{new Date(pedido.fecha_evento).toLocaleDateString()}</p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -371,16 +374,16 @@ const OrderDetail = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-3">
-              <Badge variant="outline" className={getStatusColor(order.status)}>
-                {getStatusLabel(order.status)}
+              <Badge variant="outline" className={getStatusColor(pedido.estado)}>
+                {getStatusLabel(pedido.estado)}
               </Badge>
               <span className="text-sm text-muted-foreground">
-                {totalAssigned}/{totalRequested} vestidos asignados
+                {totalAsignados}/{totalSolicitados} vestidos asignados
               </span>
             </div>
             
             <div className="space-y-2">
-              {!allAssigned && (
+              {!todosAsignados && (
                 <Button 
                   className="w-full" 
                   onClick={() => setIsScanning(true)}
@@ -391,23 +394,33 @@ const OrderDetail = () => {
                 </Button>
               )}
               
-              {allAssigned && order.status !== 'ready' && (
+              {todosAsignados && pedido.estado !== 'alistado' && pedido.estado !== 'enviado' && pedido.estado !== 'entregado' && (
                 <Button 
                   className="w-full" 
-                  onClick={() => handleUpdateStatus('ready' as const)}
+                  onClick={() => handleUpdateStatus('alistado')}
                 >
                   <CheckCircle className="h-4 w-4 mr-2" />
-                  Marcar como Listo
+                  Marcar como Alistado
                 </Button>
               )}
               
-              {order.status === 'ready' && (
+              {pedido.estado === 'alistado' && (
+                <Button 
+                  className="w-full" 
+                  onClick={() => handleUpdateStatus('enviado')}
+                >
+                  <Truck className="h-4 w-4 mr-2" />
+                  Marcar como Enviado
+                </Button>
+              )}
+
+              {pedido.estado === 'enviado' && (
                 <Button 
                   className="w-full" 
                   variant="outline" 
-                  onClick={() => handleUpdateStatus('delivered' as const)}
+                  onClick={() => handleUpdateStatus('entregado')}
                 >
-                  <Truck className="h-4 w-4 mr-2" />
+                  <CheckCircle className="h-4 w-4 mr-2" />
                   Marcar como Entregado
                 </Button>
               )}
@@ -428,7 +441,7 @@ const OrderDetail = () => {
               <Package className="h-5 w-5" />
               Asignación de Vestidos
             </CardTitle>
-            {!allAssigned && (
+            {!todosAsignados && (
               <Button 
                 size="sm" 
                 onClick={() => setIsScanning(true)}
@@ -449,7 +462,7 @@ const OrderDetail = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Código</TableHead>
+                  <TableHead>IMEI</TableHead>
                   <TableHead>Producto</TableHead>
                   <TableHead>Talla</TableHead>
                   <TableHead>Solicitados</TableHead>
@@ -459,23 +472,23 @@ const OrderDetail = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {groupedItems.map((group) => {
-                  const status = getItemStatus(group.assigned_count, group.total_requested);
+                {groupedItems.map((group, index) => {
+                  const status = getItemStatus(group.cantidad_asignada, group.cantidad_solicitada);
                   return (
-                    <TableRow key={`${group.product_id}-${group.requested_size}`}>
+                    <TableRow key={`${group.variacion_id}-${index}`}>
                       <TableCell className="font-mono text-sm">
-                        {group.product_code}
+                        {group.producto_imei}
                       </TableCell>
                       <TableCell className="font-medium">
-                        {group.product_name}
+                        {group.producto_nombre}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{group.requested_size}</Badge>
+                        <Badge variant="outline">{group.talla}</Badge>
                       </TableCell>
-                      <TableCell>{group.total_requested}</TableCell>
+                      <TableCell>{group.cantidad_solicitada}</TableCell>
                       <TableCell>
-                        <span className={group.assigned_count === group.total_requested ? 'text-success font-medium' : ''}>
-                          {group.assigned_count}
+                        <span className={group.cantidad_asignada === group.cantidad_solicitada ? 'text-success font-medium' : ''}>
+                          {group.cantidad_asignada}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -485,17 +498,15 @@ const OrderDetail = () => {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
-                          {group.items
-                            .filter(item => item.dress_unit)
-                            .map(item => (
-                              <Badge 
-                                key={item.id} 
-                                variant="secondary" 
-                                className="font-mono text-xs"
-                              >
-                                {item.dress_unit?.qr_code}
-                              </Badge>
-                            ))}
+                          {group.qr_asignados.map((qr, qrIndex) => (
+                            <Badge 
+                              key={qrIndex} 
+                              variant="secondary" 
+                              className="font-mono text-xs"
+                            >
+                              {qr}
+                            </Badge>
+                          ))}
                         </div>
                       </TableCell>
                     </TableRow>
