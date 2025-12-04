@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -10,11 +13,26 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, FileDown, Truck, CheckCircle, Camera, Package, Loader2 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { ArrowLeft, FileDown, Truck, CheckCircle, Camera, Package, Loader2, Edit, Save, X } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { QRScanner } from "@/components/QRScanner";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface Variacion {
   id: string;
@@ -47,6 +65,13 @@ interface DetallePedido {
   asignaciones: Asignacion[];
 }
 
+interface Cliente {
+  id: string;
+  nombre: string;
+  telefono: string;
+  direccion: string;
+}
+
 interface Pedido {
   id: string;
   numero_pedido: string;
@@ -54,15 +79,17 @@ interface Pedido {
   fecha_pedido: string;
   fecha_evento: string | null;
   fecha_entrega: string | null;
+  fecha_devolucion: string | null;
   direccion_entrega: string | null;
   distrito_entrega: string | null;
+  referencia_entrega: string | null;
   total: number;
-  cliente: {
-    id: string;
-    nombre: string;
-    telefono: string;
-    direccion: string;
-  };
+  subtotal: number;
+  descuento: number;
+  deposito: number;
+  deposito_pagado: boolean;
+  notas: string | null;
+  cliente: Cliente;
 }
 
 interface GroupedItem {
@@ -77,16 +104,43 @@ interface GroupedItem {
 
 type EstadoPedido = 'pendiente' | 'confirmado' | 'alistado' | 'enviado' | 'entregado' | 'cancelado';
 
+const estadoOptions: { value: EstadoPedido; label: string }[] = [
+  { value: 'pendiente', label: 'Pendiente' },
+  { value: 'confirmado', label: 'Confirmado' },
+  { value: 'alistado', label: 'Alistado' },
+  { value: 'enviado', label: 'Enviado' },
+  { value: 'entregado', label: 'Entregado' },
+  { value: 'cancelado', label: 'Cancelado' },
+];
+
 const OrderDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { canManageOrders } = useAuth();
+  
   const [pedido, setPedido] = useState<Pedido | null>(null);
   const [detalles, setDetalles] = useState<DetallePedido[]>([]);
   const [groupedItems, setGroupedItems] = useState<GroupedItem[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
+  
+  // Edit state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    estado: '' as EstadoPedido,
+    fecha_evento: '',
+    fecha_entrega: '',
+    fecha_devolucion: '',
+    direccion_entrega: '',
+    distrito_entrega: '',
+    referencia_entrega: '',
+    notas: '',
+    descuento: 0,
+    deposito: 0,
+    deposito_pagado: false,
+  });
 
   useEffect(() => {
     if (id) {
@@ -95,7 +149,6 @@ const OrderDetail = () => {
   }, [id]);
 
   useEffect(() => {
-    // Group items by variacion
     const grouped = detalles.map(detalle => ({
       variacion_id: detalle.variacion_id,
       producto_imei: detalle.variacion?.producto?.imei || '',
@@ -105,7 +158,6 @@ const OrderDetail = () => {
       cantidad_asignada: detalle.asignaciones?.length || 0,
       qr_asignados: detalle.asignaciones?.map(a => a.producto_individual?.qr_code).filter(Boolean) || [],
     }));
-
     setGroupedItems(grouped);
   }, [detalles]);
 
@@ -113,7 +165,6 @@ const OrderDetail = () => {
     try {
       setLoading(true);
       
-      // Fetch pedido with cliente
       const { data: pedidoData, error: pedidoError } = await supabase
         .from('pedidos')
         .select(`
@@ -137,7 +188,6 @@ const OrderDetail = () => {
 
       setPedido(pedidoData as Pedido);
 
-      // Fetch detalle_pedido with variaciones, productos and asignaciones
       const { data: detallesData, error: detallesError } = await supabase
         .from('detalle_pedido')
         .select(`
@@ -151,7 +201,6 @@ const OrderDetail = () => {
 
       if (detallesError) throw detallesError;
 
-      // Fetch asignaciones for each detalle
       const detallesConAsignaciones = await Promise.all(
         (detallesData || []).map(async (detalle) => {
           const { data: asignacionesData } = await supabase
@@ -182,6 +231,73 @@ const OrderDetail = () => {
     }
   };
 
+  const openEditDialog = () => {
+    if (!pedido) return;
+    setEditForm({
+      estado: pedido.estado as EstadoPedido,
+      fecha_evento: pedido.fecha_evento || '',
+      fecha_entrega: pedido.fecha_entrega || '',
+      fecha_devolucion: pedido.fecha_devolucion || '',
+      direccion_entrega: pedido.direccion_entrega || '',
+      distrito_entrega: pedido.distrito_entrega || '',
+      referencia_entrega: pedido.referencia_entrega || '',
+      notas: pedido.notas || '',
+      descuento: pedido.descuento || 0,
+      deposito: pedido.deposito || 0,
+      deposito_pagado: pedido.deposito_pagado || false,
+    });
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!pedido) return;
+    
+    try {
+      setProcessing(true);
+      
+      const { error } = await supabase
+        .from('pedidos')
+        .update({
+          estado: editForm.estado,
+          fecha_evento: editForm.fecha_evento || null,
+          fecha_entrega: editForm.fecha_entrega || null,
+          fecha_devolucion: editForm.fecha_devolucion || null,
+          direccion_entrega: editForm.direccion_entrega || null,
+          distrito_entrega: editForm.distrito_entrega || null,
+          referencia_entrega: editForm.referencia_entrega || null,
+          notas: editForm.notas || null,
+          descuento: editForm.descuento,
+          deposito: editForm.deposito,
+          deposito_pagado: editForm.deposito_pagado,
+          total: pedido.subtotal - editForm.descuento,
+        })
+        .eq('id', pedido.id);
+
+      if (error) throw error;
+
+      setPedido({
+        ...pedido,
+        ...editForm,
+        total: pedido.subtotal - editForm.descuento,
+      });
+      
+      setIsEditing(false);
+      toast({
+        title: "Pedido actualizado",
+        description: "Los cambios se guardaron correctamente",
+      });
+    } catch (error) {
+      console.error('Error updating pedido:', error);
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar el pedido",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleQRScan = async (qrCode: string) => {
     if (!pedido) {
       return { qrCode, success: false, message: "No hay pedido seleccionado" };
@@ -207,7 +323,6 @@ const OrderDetail = () => {
       };
 
       if (result.success) {
-        // Refresh pedido details in background
         fetchPedidoDetails();
         
         return {
@@ -283,7 +398,7 @@ const OrderDetail = () => {
       pendiente: 'bg-warning/10 text-warning border-warning/20',
       confirmado: 'bg-primary/10 text-primary border-primary/20',
       alistado: 'bg-primary/10 text-primary border-primary/20',
-      enviado: 'bg-info/10 text-info border-info/20',
+      enviado: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
       entregado: 'bg-success/10 text-success border-success/20',
       cancelado: 'bg-destructive/10 text-destructive border-destructive/20',
     };
@@ -328,6 +443,146 @@ const OrderDetail = () => {
         />
       )}
 
+      {/* Edit Dialog */}
+      <Dialog open={isEditing} onOpenChange={setIsEditing}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Pedido {pedido.numero_pedido}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Estado del Pedido</Label>
+              <Select 
+                value={editForm.estado} 
+                onValueChange={(v) => setEditForm(prev => ({ ...prev, estado: v as EstadoPedido }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {estadoOptions.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label>Fecha del Evento</Label>
+                <Input
+                  type="date"
+                  value={editForm.fecha_evento}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, fecha_evento: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Fecha de Entrega</Label>
+                <Input
+                  type="date"
+                  value={editForm.fecha_entrega}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, fecha_entrega: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Fecha de Devolución</Label>
+                <Input
+                  type="date"
+                  value={editForm.fecha_devolucion}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, fecha_devolucion: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Dirección de Entrega</Label>
+              <Textarea
+                value={editForm.direccion_entrega}
+                onChange={(e) => setEditForm(prev => ({ ...prev, direccion_entrega: e.target.value }))}
+                placeholder="Dirección completa..."
+              />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Distrito</Label>
+                <Input
+                  value={editForm.distrito_entrega}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, distrito_entrega: e.target.value }))}
+                  placeholder="Distrito de entrega..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Referencia</Label>
+                <Input
+                  value={editForm.referencia_entrega}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, referencia_entrega: e.target.value }))}
+                  placeholder="Referencia de ubicación..."
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label>Descuento (S/)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editForm.descuento}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, descuento: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Depósito (S/)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editForm.deposito}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, deposito: parseFloat(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Depósito Pagado</Label>
+                <Select 
+                  value={editForm.deposito_pagado ? 'si' : 'no'} 
+                  onValueChange={(v) => setEditForm(prev => ({ ...prev, deposito_pagado: v === 'si' }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="no">No</SelectItem>
+                    <SelectItem value="si">Sí</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Notas</Label>
+              <Textarea
+                value={editForm.notas}
+                onChange={(e) => setEditForm(prev => ({ ...prev, notas: e.target.value }))}
+                placeholder="Observaciones adicionales..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditing(false)}>
+              <X className="h-4 w-4 mr-2" />
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={processing}>
+              {processing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+              Guardar Cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex justify-between items-center">
         <div>
           <Button variant="ghost" onClick={() => navigate("/pedidos")} className="mb-2">
@@ -339,6 +594,12 @@ const OrderDetail = () => {
             Asignar vestidos y preparar para envío
           </p>
         </div>
+        {canManageOrders && (
+          <Button variant="outline" onClick={openEditDialog}>
+            <Edit className="h-4 w-4 mr-2" />
+            Editar Pedido
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -365,7 +626,13 @@ const OrderDetail = () => {
             {pedido.fecha_evento && (
               <div>
                 <p className="text-sm text-muted-foreground">Fecha del Evento</p>
-                <p className="font-medium">{new Date(pedido.fecha_evento).toLocaleDateString()}</p>
+                <p className="font-medium">{new Date(pedido.fecha_evento).toLocaleDateString('es-PE')}</p>
+              </div>
+            )}
+            {pedido.notas && (
+              <div>
+                <p className="text-sm text-muted-foreground">Notas</p>
+                <p className="text-sm">{pedido.notas}</p>
               </div>
             )}
           </CardContent>
@@ -384,55 +651,80 @@ const OrderDetail = () => {
                 {totalAsignados}/{totalSolicitados} vestidos asignados
               </span>
             </div>
-            
-            <div className="space-y-2">
-              {!todosAsignados && (
-                <Button 
-                  className="w-full" 
-                  onClick={() => setIsScanning(true)}
-                  disabled={processing}
-                >
-                  <Camera className="h-4 w-4 mr-2" />
-                  Escanear QR para Asignar
-                </Button>
-              )}
-              
-              {todosAsignados && pedido.estado !== 'alistado' && pedido.estado !== 'enviado' && pedido.estado !== 'entregado' && (
-                <Button 
-                  className="w-full" 
-                  onClick={() => handleUpdateStatus('alistado')}
-                >
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  Marcar como Alistado
-                </Button>
-              )}
-              
-              {pedido.estado === 'alistado' && (
-                <Button 
-                  className="w-full" 
-                  onClick={() => handleUpdateStatus('enviado')}
-                >
-                  <Truck className="h-4 w-4 mr-2" />
-                  Marcar como Enviado
-                </Button>
-              )}
 
-              {pedido.estado === 'enviado' && (
-                <Button 
-                  className="w-full" 
-                  variant="outline" 
-                  onClick={() => handleUpdateStatus('entregado')}
-                >
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  Marcar como Entregado
-                </Button>
+            <div className="border rounded-lg p-3 space-y-1 bg-muted/50 text-sm">
+              <div className="flex justify-between">
+                <span>Subtotal:</span>
+                <span>S/ {pedido.subtotal?.toFixed(2)}</span>
+              </div>
+              {pedido.descuento > 0 && (
+                <div className="flex justify-between">
+                  <span>Descuento:</span>
+                  <span>- S/ {pedido.descuento?.toFixed(2)}</span>
+                </div>
               )}
-              
-              <Button className="w-full" variant="outline">
-                <FileDown className="h-4 w-4 mr-2" />
-                Exportar a Excel
-              </Button>
+              <div className="flex justify-between font-bold border-t pt-1">
+                <span>Total:</span>
+                <span>S/ {pedido.total?.toFixed(2)}</span>
+              </div>
+              {pedido.deposito > 0 && (
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Depósito {pedido.deposito_pagado ? '(Pagado)' : '(Pendiente)'}:</span>
+                  <span>S/ {pedido.deposito?.toFixed(2)}</span>
+                </div>
+              )}
             </div>
+            
+            {canManageOrders && (
+              <div className="space-y-2">
+                {!todosAsignados && (
+                  <Button 
+                    className="w-full" 
+                    onClick={() => setIsScanning(true)}
+                    disabled={processing}
+                  >
+                    <Camera className="h-4 w-4 mr-2" />
+                    Escanear QR para Asignar
+                  </Button>
+                )}
+                
+                {todosAsignados && pedido.estado !== 'alistado' && pedido.estado !== 'enviado' && pedido.estado !== 'entregado' && (
+                  <Button 
+                    className="w-full" 
+                    onClick={() => handleUpdateStatus('alistado')}
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Marcar como Alistado
+                  </Button>
+                )}
+                
+                {pedido.estado === 'alistado' && (
+                  <Button 
+                    className="w-full" 
+                    onClick={() => handleUpdateStatus('enviado')}
+                  >
+                    <Truck className="h-4 w-4 mr-2" />
+                    Marcar como Enviado
+                  </Button>
+                )}
+
+                {pedido.estado === 'enviado' && (
+                  <Button 
+                    className="w-full" 
+                    variant="outline" 
+                    onClick={() => handleUpdateStatus('entregado')}
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Marcar como Entregado
+                  </Button>
+                )}
+                
+                <Button className="w-full" variant="outline">
+                  <FileDown className="h-4 w-4 mr-2" />
+                  Exportar a Excel
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -444,7 +736,7 @@ const OrderDetail = () => {
               <Package className="h-5 w-5" />
               Asignación de Vestidos
             </CardTitle>
-            {!todosAsignados && (
+            {canManageOrders && !todosAsignados && (
               <Button 
                 size="sm" 
                 onClick={() => setIsScanning(true)}
@@ -501,15 +793,15 @@ const OrderDetail = () => {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
-                          {group.qr_asignados.map((qr, qrIndex) => (
-                            <Badge 
-                              key={qrIndex} 
-                              variant="secondary" 
-                              className="font-mono text-xs"
-                            >
-                              {qr}
-                            </Badge>
-                          ))}
+                          {group.qr_asignados.length > 0 ? (
+                            group.qr_asignados.map((qr, i) => (
+                              <Badge key={i} variant="secondary" className="text-xs font-mono">
+                                {qr}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span className="text-muted-foreground text-sm">-</span>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
