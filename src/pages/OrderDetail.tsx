@@ -183,9 +183,10 @@ const OrderDetail = () => {
   };
 
   const handleQRScan = async (qrCode: string) => {
-    if (!pedido) return;
+    if (!pedido) {
+      return { qrCode, success: false, message: "No hay pedido seleccionado" };
+    }
     
-    setProcessing(true);
     try {
       const { data, error } = await supabase.rpc('asignar_producto_por_qr', {
         p_qr_code: qrCode,
@@ -206,30 +207,32 @@ const OrderDetail = () => {
       };
 
       if (result.success) {
-        toast({
-          title: "Vestido Asignado",
-          description: `${result.producto_nombre} (${result.talla}): ${result.asignados}/${result.solicitados} ${result.completo ? '✓ Completo' : ''}`,
-        });
+        // Refresh pedido details in background
+        fetchPedidoDetails();
         
-        // Refresh pedido details
-        await fetchPedidoDetails();
-        
+        return {
+          qrCode,
+          success: true,
+          message: result.message || "Asignado correctamente",
+          productoNombre: result.producto_nombre,
+          talla: result.talla,
+          asignados: result.asignados,
+          solicitados: result.solicitados,
+        };
       } else {
-        toast({
-          title: "Error al asignar",
-          description: result.error || "No se pudo asignar el vestido",
-          variant: "destructive",
-        });
+        return {
+          qrCode,
+          success: false,
+          message: result.error || "No se pudo asignar el vestido",
+        };
       }
     } catch (error) {
       console.error('Error assigning product:', error);
-      toast({
-        title: "Error",
-        description: "Ocurrió un error al procesar el código QR",
-        variant: "destructive",
-      });
-    } finally {
-      setProcessing(false);
+      return {
+        qrCode,
+        success: false,
+        message: "Error al procesar el código QR",
+      };
     }
   };
 
