@@ -483,6 +483,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          precio: number
           producto_id: string
           stock_disponible: number
           talla: string
@@ -492,6 +493,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          precio?: number
           producto_id: string
           stock_disponible?: number
           talla: string
@@ -501,6 +503,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          precio?: number
           producto_id?: string
           stock_disponible?: number
           talla?: string

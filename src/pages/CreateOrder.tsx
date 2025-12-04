@@ -72,6 +72,7 @@ const CreateOrder = () => {
           id,
           talla,
           stock_disponible,
+          precio,
           productos (id, imei, nombre)
         `)
         .gt('stock_disponible', 0)
@@ -225,7 +226,7 @@ const CreateOrder = () => {
       producto_nombre: `${variacion.productos?.imei} - ${variacion.productos?.nombre}`,
       talla: variacion.talla,
       cantidad: 1,
-      precio_unitario: 0,
+      precio_unitario: (variacion as any).precio || 0,
       stock_disponible: variacion.stock_disponible
     };
 
