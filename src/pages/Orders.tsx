@@ -9,51 +9,70 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Eye, FileDown } from "lucide-react";
+import { Plus, Eye, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-
-const mockOrders = [
-  {
-    id: "PED-001",
-    cliente: "María González",
-    telefono: "555-0101",
-    fecha: "2025-12-01",
-    items: 3,
-    estado: "Alistado",
-  },
-  {
-    id: "PED-002",
-    cliente: "Ana Torres",
-    telefono: "555-0102",
-    fecha: "2025-12-01",
-    items: 2,
-    estado: "Pendiente de Alistamiento",
-  },
-  {
-    id: "PED-003",
-    cliente: "Carmen Silva",
-    telefono: "555-0103",
-    fecha: "2025-11-30",
-    items: 1,
-    estado: "Enviado",
-  },
-];
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Orders = () => {
   const navigate = useNavigate();
+  const { canManageOrders } = useAuth();
+
+  const { data: pedidos, isLoading } = useQuery({
+    queryKey: ['pedidos'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('pedidos')
+        .select(`
+          *,
+          clientes (nombre, telefono)
+        `)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data;
+    }
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "Alistado":
+      case "alistado":
         return "bg-success/10 text-success border-success/20";
-      case "Pendiente de Alistamiento":
+      case "pendiente":
         return "bg-warning/10 text-warning border-warning/20";
-      case "Enviado":
+      case "confirmado":
         return "bg-primary/10 text-primary border-primary/20";
+      case "enviado":
+        return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+      case "entregado":
+        return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+      case "cancelado":
+        return "bg-destructive/10 text-destructive border-destructive/20";
       default:
         return "bg-muted text-muted-foreground";
     }
   };
+
+  const getStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      pendiente: "Pendiente",
+      confirmado: "Confirmado",
+      alistado: "Alistado",
+      enviado: "Enviado",
+      entregado: "Entregado",
+      cancelado: "Cancelado"
+    };
+    return labels[status] || status;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -64,64 +83,73 @@ const Orders = () => {
             Ver y administrar pedidos confirmados
           </p>
         </div>
-        <Button onClick={() => navigate("/pedidos/nuevo")}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nuevo Pedido
-        </Button>
+        {canManageOrders && (
+          <Button onClick={() => navigate("/pedidos/nuevo")}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nuevo Pedido
+          </Button>
+        )}
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Pedidos Confirmados del Día</CardTitle>
+          <CardTitle>Todos los Pedidos</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID Pedido</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead>Teléfono</TableHead>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {mockOrders.map((order) => (
-                <TableRow key={order.id}>
-                  <TableCell className="font-medium">{order.id}</TableCell>
-                  <TableCell>{order.cliente}</TableCell>
-                  <TableCell>{order.telefono}</TableCell>
-                  <TableCell>{order.fecha}</TableCell>
-                  <TableCell>{order.items}</TableCell>
-                  <TableCell>
-                    <Badge
-                      className={getStatusColor(order.estado)}
-                      variant="outline"
-                    >
-                      {order.estado}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
+          {pedidos && pedidos.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nº Pedido</TableHead>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Teléfono</TableHead>
+                  <TableHead>Fecha Evento</TableHead>
+                  <TableHead>Total</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pedidos.map((pedido) => (
+                  <TableRow key={pedido.id}>
+                    <TableCell className="font-medium">
+                      {pedido.numero_pedido || pedido.id.slice(0, 8)}
+                    </TableCell>
+                    <TableCell>{pedido.clientes?.nombre}</TableCell>
+                    <TableCell>{pedido.clientes?.telefono}</TableCell>
+                    <TableCell>
+                      {pedido.fecha_evento 
+                        ? new Date(pedido.fecha_evento).toLocaleDateString('es-PE')
+                        : '-'}
+                    </TableCell>
+                    <TableCell>S/ {pedido.total?.toFixed(2)}</TableCell>
+                    <TableCell>
+                      <Badge
+                        className={getStatusColor(pedido.estado)}
+                        variant="outline"
+                      >
+                        {getStatusLabel(pedido.estado)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => navigate(`/pedidos/${order.id}`)}
+                        onClick={() => navigate(`/pedidos/${pedido.id}`)}
                       >
                         <Eye className="h-4 w-4 mr-1" />
-                        Ver Detalles
+                        Ver
                       </Button>
-                      <Button variant="ghost" size="sm">
-                        <FileDown className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No hay pedidos registrados
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
