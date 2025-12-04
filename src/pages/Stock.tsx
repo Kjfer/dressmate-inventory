@@ -37,6 +37,7 @@ interface StockForm {
   tipo_talla_id: string;
   talla: string;
   cantidad: number;
+  precio: number;
 }
 
 const initialForm: StockForm = {
@@ -44,6 +45,7 @@ const initialForm: StockForm = {
   tipo_talla_id: "",
   talla: "",
   cantidad: 1,
+  precio: 0,
 };
 
 const Stock = () => {
@@ -90,6 +92,7 @@ const Stock = () => {
           id,
           talla,
           stock_disponible,
+          precio,
           producto:productos(id, imei, nombre),
           tipo_talla:tipo_tallas(nombre)
         `)
@@ -124,6 +127,7 @@ const Stock = () => {
             producto_id: data.producto_id,
             tipo_talla_id: data.tipo_talla_id,
             talla: data.talla,
+            precio: data.precio,
             stock_disponible: 0,
           })
           .select()
@@ -287,6 +291,20 @@ const Stock = () => {
               </div>
             )}
 
+            {form.tipo_talla_id && (
+              <div className="space-y-2">
+                <Label>Precio de Alquiler (S/)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.precio}
+                  onChange={(e) => setForm(prev => ({ ...prev, precio: parseFloat(e.target.value) || 0 }))}
+                  placeholder="0.00"
+                />
+              </div>
+            )}
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeDialog}>
                 Cancelar
@@ -361,11 +379,12 @@ const Stock = () => {
                   <TableHead>Producto</TableHead>
                   <TableHead>Tipo Talla</TableHead>
                   <TableHead>Talla</TableHead>
+                  <TableHead>Precio</TableHead>
                   <TableHead>Stock Disponible</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {variaciones.map((v) => (
+                {variaciones.map((v: any) => (
                   <TableRow key={v.id}>
                     <TableCell className="font-mono text-sm">{v.producto?.imei}</TableCell>
                     <TableCell className="font-medium">{v.producto?.nombre}</TableCell>
@@ -373,6 +392,7 @@ const Stock = () => {
                     <TableCell>
                       <Badge variant="outline">{v.talla}</Badge>
                     </TableCell>
+                    <TableCell>S/ {(v.precio || 0).toFixed(2)}</TableCell>
                     <TableCell>
                       <Badge variant={v.stock_disponible > 0 ? "default" : "secondary"}>
                         {v.stock_disponible}

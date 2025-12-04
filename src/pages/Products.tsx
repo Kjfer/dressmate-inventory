@@ -36,6 +36,7 @@ interface VariacionInput {
   tipoTallaId: string;
   talla: string;
   cantidad: number;
+  precio: number;
 }
 
 interface ProductForm {
@@ -129,6 +130,7 @@ const Products = () => {
             tipo_talla_id: variacion.tipoTallaId,
             talla: variacion.talla,
             stock_disponible: variacion.cantidad,
+            precio: variacion.precio,
           })
           .select()
           .single();
@@ -202,7 +204,7 @@ const Products = () => {
           : v
       ));
     } else {
-      setVariaciones([...variaciones, { tipoTallaId: selectedTipoTalla, talla, cantidad: 1 }]);
+      setVariaciones([...variaciones, { tipoTallaId: selectedTipoTalla, talla, cantidad: 1, precio: 0 }]);
     }
   };
 
@@ -214,6 +216,12 @@ const Products = () => {
     if (cantidad < 1) return;
     setVariaciones(variaciones.map(v => 
       v.tipoTallaId === tipoTallaId && v.talla === talla ? { ...v, cantidad } : v
+    ));
+  };
+
+  const updatePrecio = (tipoTallaId: string, talla: string, precio: number) => {
+    setVariaciones(variaciones.map(v => 
+      v.tipoTallaId === tipoTallaId && v.talla === talla ? { ...v, precio } : v
     ));
   };
 
@@ -323,7 +331,7 @@ const Products = () => {
                   {variaciones.map((v) => {
                     const tipoNombre = tipoTallas?.find(t => t.id === v.tipoTallaId)?.nombre || '';
                     return (
-                      <div key={`${v.tipoTallaId}-${v.talla}`} className="flex items-center gap-2 bg-muted/50 p-2 rounded">
+                      <div key={`${v.tipoTallaId}-${v.talla}`} className="flex items-center gap-2 bg-muted/50 p-2 rounded flex-wrap">
                         <Badge variant="secondary">{tipoNombre}</Badge>
                         <span className="font-medium">{v.talla}</span>
                         <span className="text-muted-foreground">×</span>
@@ -332,7 +340,19 @@ const Products = () => {
                           min={1}
                           value={v.cantidad}
                           onChange={(e) => updateCantidad(v.tipoTallaId, v.talla, parseInt(e.target.value) || 1)}
+                          className="w-16 h-8"
+                        />
+                        <span className="text-sm text-muted-foreground">uds</span>
+                        <span className="text-muted-foreground">|</span>
+                        <span className="text-sm">S/</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={v.precio}
+                          onChange={(e) => updatePrecio(v.tipoTallaId, v.talla, parseFloat(e.target.value) || 0)}
                           className="w-20 h-8"
+                          placeholder="Precio"
                         />
                         <Button
                           type="button"
