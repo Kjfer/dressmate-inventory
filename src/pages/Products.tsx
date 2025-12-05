@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Package, Loader2, Trash2, Edit, Eye } from "lucide-react";
+import { Plus, Package, Loader2, Trash2, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -255,15 +255,15 @@ const Products = () => {
   const totalVariaciones = productos?.reduce((sum, p) => sum + (p.variaciones_producto?.length || 0), 0) || 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6 pb-20 md:pb-6">
       {/* Create Product Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Crear Nuevo Producto</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>IMEI / Código *</Label>
                 <Input
@@ -308,7 +308,7 @@ const Products = () => {
             <div className="space-y-3 border-t pt-4">
               <Label>Variaciones de Talla (Opcional)</Label>
               <p className="text-sm text-muted-foreground">
-                Puede agregar variaciones ahora o después desde la lista de productos
+                Puede agregar variaciones ahora o después
               </p>
               
               <div className="space-y-2">
@@ -334,6 +334,7 @@ const Products = () => {
                       variant="outline"
                       size="sm"
                       onClick={() => addVariacion(talla)}
+                      className="h-9"
                     >
                       + {talla}
                     </Button>
@@ -346,28 +347,30 @@ const Products = () => {
                   {variaciones.map((v) => {
                     const tipoNombre = tipoTallas?.find(t => t.id === v.tipoTallaId)?.nombre || '';
                     return (
-                      <div key={`${v.tipoTallaId}-${v.talla}`} className="flex items-center gap-2 bg-muted/50 p-2 rounded flex-wrap">
-                        <Badge variant="secondary">{tipoNombre}</Badge>
+                      <div key={`${v.tipoTallaId}-${v.talla}`} className="flex items-center gap-2 bg-muted/50 p-3 rounded-lg flex-wrap">
+                        <Badge variant="secondary" className="shrink-0">{tipoNombre}</Badge>
                         <span className="font-medium">{v.talla}</span>
-                        <span className="text-muted-foreground">|</span>
-                        <span className="text-sm">S/</span>
-                        <Input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={v.precio}
-                          onChange={(e) => updatePrecio(v.tipoTallaId, v.talla, parseFloat(e.target.value) || 0)}
-                          className="w-20 h-8"
-                          placeholder="Precio"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeVariacion(v.tipoTallaId, v.talla)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        <div className="flex items-center gap-1 ml-auto">
+                          <span className="text-sm text-muted-foreground">S/</span>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={v.precio}
+                            onChange={(e) => updatePrecio(v.tipoTallaId, v.talla, parseFloat(e.target.value) || 0)}
+                            className="w-24 h-9"
+                            placeholder="Precio"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeVariacion(v.tipoTallaId, v.talla)}
+                            className="h-9 w-9 shrink-0"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
@@ -375,11 +378,11 @@ const Products = () => {
               )}
             </div>
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={closeDialog}>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button type="button" variant="outline" onClick={closeDialog} className="w-full sm:w-auto">
                 Cancelar
               </Button>
-              <Button type="submit" disabled={createProducto.isPending}>
+              <Button type="submit" disabled={createProducto.isPending} className="w-full sm:w-auto">
                 {createProducto.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Crear Producto
               </Button>
@@ -390,7 +393,7 @@ const Products = () => {
 
       {/* Add Variacion to Existing Product Dialog */}
       <Dialog open={isVariacionDialogOpen} onOpenChange={setIsVariacionDialogOpen}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] max-w-md">
           <DialogHeader>
             <DialogTitle>Agregar Variación de Talla</DialogTitle>
           </DialogHeader>
@@ -443,13 +446,14 @@ const Products = () => {
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsVariacionDialogOpen(false)}>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setIsVariacionDialogOpen(false)} className="w-full sm:w-auto">
               Cancelar
             </Button>
             <Button 
               onClick={handleAddVariacion} 
               disabled={!newVariacion.tipoTallaId || !newVariacion.talla || addVariacionMutation.isPending}
+              className="w-full sm:w-auto"
             >
               {addVariacionMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Agregar Variación
@@ -458,15 +462,16 @@ const Products = () => {
         </DialogContent>
       </Dialog>
 
-      <div className="flex justify-between items-center">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Gestión de Productos</h1>
-          <p className="text-muted-foreground mt-1">
-            Crear productos y variaciones por talla
+          <h1 className="text-2xl sm:text-3xl font-bold">Productos</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Gestiona productos y variaciones
           </p>
         </div>
         {canManageProducts && (
-          <Button onClick={openDialog}>
+          <Button onClick={openDialog} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" />
             Nuevo Producto
           </Button>
@@ -474,61 +479,74 @@ const Products = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Productos</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+            <CardTitle className="text-xs sm:text-sm font-medium">Productos</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{productos?.length || 0}</div>
+          <CardContent className="px-4 pb-4">
+            <div className="text-xl sm:text-2xl font-bold">{productos?.length || 0}</div>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Variaciones</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+            <CardTitle className="text-xs sm:text-sm font-medium">Variaciones</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalVariaciones}</div>
+          <CardContent className="px-4 pb-4">
+            <div className="text-xl sm:text-2xl font-bold">{totalVariaciones}</div>
           </CardContent>
         </Card>
       </div>
 
+      {/* Products List */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <CardHeader className="px-4 sm:px-6">
+          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
             <Package className="h-5 w-5" />
-            Catálogo de Productos
+            Catálogo
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-4 sm:px-6">
           {loadingProductos ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : productos && productos.length > 0 ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {productos.map((producto) => (
-                <div key={producto.id} className="border rounded-lg p-4">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">{producto.imei}</Badge>
-                        <h3 className="font-semibold">{producto.nombre}</h3>
+                <div 
+                  key={producto.id} 
+                  className="border rounded-lg p-4 bg-card hover:bg-accent/5 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="font-mono text-xs shrink-0">
+                          {producto.imei}
+                        </Badge>
+                        <h3 className="font-semibold text-sm sm:text-base truncate">
+                          {producto.nombre}
+                        </h3>
                       </div>
                       {producto.descripcion && (
-                        <p className="text-sm text-muted-foreground mt-1">{producto.descripcion}</p>
+                        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                          {producto.descripcion}
+                        </p>
                       )}
                       
                       {/* Variaciones */}
                       <div className="mt-3">
-                        <p className="text-xs text-muted-foreground mb-2">Variaciones:</p>
                         {producto.variaciones_producto && producto.variaciones_producto.length > 0 ? (
                           <div className="flex flex-wrap gap-2">
                             {producto.variaciones_producto.map((v: any) => (
-                              <Badge key={v.id} variant="secondary" className="flex items-center gap-1">
-                                {v.talla} - S/{v.precio?.toFixed(2)} 
-                                <span className="text-xs opacity-70">({v.stock_disponible} uds)</span>
+                              <Badge 
+                                key={v.id} 
+                                variant="secondary" 
+                                className="text-xs py-1 px-2"
+                              >
+                                {v.talla} · S/{v.precio?.toFixed(2)} 
+                                <span className="opacity-60 ml-1">({v.stock_disponible})</span>
                               </Badge>
                             ))}
                           </div>
@@ -538,36 +556,42 @@ const Products = () => {
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-1">
-                      {canManageProducts && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openVariacionDialog(producto.id)}
-                            title="Agregar variación"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(producto.id)}
-                            disabled={deleteProducto.isPending}
-                            title="Eliminar producto"
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
+                    {canManageProducts && (
+                      <div className="flex flex-col sm:flex-row items-center gap-1 shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openVariacionDialog(producto.id)}
+                          className="h-9 px-3"
+                        >
+                          <Plus className="h-4 w-4 sm:mr-1" />
+                          <span className="hidden sm:inline">Variación</span>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDelete(producto.id)}
+                          disabled={deleteProducto.isPending}
+                          className="h-9 w-9"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              No hay productos registrados
+            <div className="text-center py-12 text-muted-foreground">
+              <Package className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <p>No hay productos registrados</p>
+              {canManageProducts && (
+                <Button onClick={openDialog} variant="outline" className="mt-4">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Crear primer producto
+                </Button>
+              )}
             </div>
           )}
         </CardContent>

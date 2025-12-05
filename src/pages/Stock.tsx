@@ -11,27 +11,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
-import { Plus, QrCode, Package, Loader2, ChevronDown, ChevronRight, Eye, Trash2 } from "lucide-react";
+import { Plus, QrCode, Package, Loader2, Eye, Trash2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -51,7 +38,6 @@ const Stock = () => {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [selectedVariacionId, setSelectedVariacionId] = useState<string | null>(null);
   const [form, setForm] = useState<AddUnidadesForm>({ variacion_id: "", cantidad: 1 });
-  const [expandedVariaciones, setExpandedVariaciones] = useState<Set<string>>(new Set());
 
   // Fetch variaciones with producto info
   const { data: variaciones, isLoading } = useQuery({
@@ -92,10 +78,9 @@ const Stock = () => {
   // Create productos individuales mutation
   const createIndividualesMutation = useMutation({
     mutationFn: async (data: AddUnidadesForm) => {
-      // Create productos_individuales (QR se genera automáticamente por trigger)
       const individuales = Array.from({ length: data.cantidad }, () => ({
         variacion_id: data.variacion_id,
-        qr_code: 'TEMP', // Will be overwritten by trigger
+        qr_code: 'TEMP',
         estado: 'disponible' as const,
       }));
 
@@ -105,7 +90,6 @@ const Stock = () => {
       
       if (indError) throw indError;
 
-      // Recalculate stock
       const { count } = await supabase
         .from('productos_individuales')
         .select('*', { count: 'exact', head: true })
@@ -153,7 +137,6 @@ const Stock = () => {
       
       if (error) throw error;
 
-      // Recalculate stock
       const { count } = await supabase
         .from('productos_individuales')
         .select('*', { count: 'exact', head: true })
@@ -205,16 +188,6 @@ const Stock = () => {
     }
   };
 
-  const toggleExpand = (variacionId: string) => {
-    const newExpanded = new Set(expandedVariaciones);
-    if (newExpanded.has(variacionId)) {
-      newExpanded.delete(variacionId);
-    } else {
-      newExpanded.add(variacionId);
-    }
-    setExpandedVariaciones(newExpanded);
-  };
-
   const getEstadoColor = (estado: string) => {
     switch (estado) {
       case 'disponible': return 'bg-success/10 text-success border-success/20';
@@ -235,6 +208,7 @@ const Stock = () => {
   };
 
   const totalStock = variaciones?.reduce((sum, v) => sum + v.stock_disponible, 0) || 0;
+  const selectedVariacion = variaciones?.find(v => v.id === selectedVariacionId);
 
   if (isLoading) {
     return (
@@ -244,13 +218,11 @@ const Stock = () => {
     );
   }
 
-  const selectedVariacion = variaciones?.find(v => v.id === selectedVariacionId);
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6 pb-20 md:pb-6">
       {/* Add Units Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] max-w-md">
           <DialogHeader>
             <DialogTitle>Agregar Unidades Físicas</DialogTitle>
           </DialogHeader>
@@ -264,10 +236,12 @@ const Stock = () => {
                 <SelectTrigger>
                   <SelectValue placeholder="Seleccionar variación..." />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[50vh]">
                   {variaciones?.map((v: any) => (
                     <SelectItem key={v.id} value={v.id}>
-                      {v.producto?.imei} - {v.producto?.nombre} ({v.talla})
+                      <span className="block truncate">
+                        {v.producto?.imei} - {v.producto?.nombre} ({v.talla})
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -287,11 +261,11 @@ const Stock = () => {
               </p>
             </div>
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={closeDialog}>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button type="button" variant="outline" onClick={closeDialog} className="w-full sm:w-auto">
                 Cancelar
               </Button>
-              <Button type="submit" disabled={createIndividualesMutation.isPending}>
+              <Button type="submit" disabled={createIndividualesMutation.isPending} className="w-full sm:w-auto">
                 {createIndividualesMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Crear Unidades
               </Button>
@@ -302,69 +276,73 @@ const Stock = () => {
 
       {/* View Individual Products Dialog */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="w-[95vw] max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
               <QrCode className="h-5 w-5" />
-              Unidades Físicas - {selectedVariacion?.producto?.nombre} ({selectedVariacion?.talla})
+              <span className="truncate">
+                {selectedVariacion?.producto?.nombre} ({selectedVariacion?.talla})
+              </span>
             </DialogTitle>
           </DialogHeader>
           
-          {loadingIndividuales ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
-          ) : productosIndividuales && productosIndividuales.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Código QR</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Entallado</TableHead>
-                  <TableHead>Creado</TableHead>
-                  {canManageProducts && <TableHead className="w-[60px]"></TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {loadingIndividuales ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : productosIndividuales && productosIndividuales.length > 0 ? (
+              <div className="space-y-2 pr-1">
                 {productosIndividuales.map((pi) => (
-                  <TableRow key={pi.id}>
-                    <TableCell className="font-mono text-sm font-medium">{pi.qr_code}</TableCell>
-                    <TableCell>
-                      <Badge className={getEstadoColor(pi.estado)}>
-                        {getEstadoLabel(pi.estado)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{pi.entallado ? 'Sí' : 'No'}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {new Date(pi.created_at).toLocaleDateString()}
-                    </TableCell>
-                    {canManageProducts && (
-                      <TableCell>
-                        {pi.estado === 'disponible' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteIndividual(pi.id)}
-                            disabled={deleteIndividualMutation.isPending}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                  <div 
+                    key={pi.id} 
+                    className="flex items-center justify-between p-3 rounded-lg border bg-card"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-mono text-sm font-medium truncate">{pi.qr_code}</p>
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                        <Badge className={`${getEstadoColor(pi.estado)} text-xs`}>
+                          {getEstadoLabel(pi.estado)}
+                        </Badge>
+                        {pi.entallado && (
+                          <Badge variant="outline" className="text-xs">Entallado</Badge>
                         )}
-                      </TableCell>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(pi.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                    {canManageProducts && pi.estado === 'disponible' && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteIndividual(pi.id)}
+                        disabled={deleteIndividualMutation.isPending}
+                        className="shrink-0 ml-2"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     )}
-                  </TableRow>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              No hay unidades físicas para esta variación
-            </div>
-          )}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <QrCode className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                <p>No hay unidades físicas</p>
+              </div>
+            )}
+          </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0 pt-4 border-t flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setIsViewDialogOpen(false)} className="w-full sm:w-auto">
+              Cerrar
+            </Button>
             {canManageProducts && selectedVariacionId && (
-              <Button onClick={() => { setIsViewDialogOpen(false); openDialog(selectedVariacionId); }}>
+              <Button 
+                onClick={() => { setIsViewDialogOpen(false); openDialog(selectedVariacionId); }}
+                className="w-full sm:w-auto"
+              >
                 <Plus className="h-4 w-4 mr-2" />
                 Agregar Unidades
               </Button>
@@ -373,15 +351,16 @@ const Stock = () => {
         </DialogContent>
       </Dialog>
 
-      <div className="flex justify-between items-center">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Gestión de Stock</h1>
-          <p className="text-muted-foreground mt-1">
-            Administrar unidades físicas y códigos QR
+          <h1 className="text-2xl sm:text-3xl font-bold">Stock</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Unidades físicas y códigos QR
           </p>
         </div>
         {canManageProducts && (
-          <Button onClick={() => openDialog()}>
+          <Button onClick={() => openDialog()} className="w-full sm:w-auto">
             <Plus className="h-4 w-4 mr-2" />
             Agregar Unidades
           </Button>
@@ -389,102 +368,112 @@ const Stock = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Variaciones</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+            <CardTitle className="text-xs sm:text-sm font-medium">Variaciones</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{variaciones?.length || 0}</div>
+          <CardContent className="px-4 pb-4">
+            <div className="text-xl sm:text-2xl font-bold">{variaciones?.length || 0}</div>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Disponible</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+            <CardTitle className="text-xs sm:text-sm font-medium">Disponible</CardTitle>
             <QrCode className="h-4 w-4 text-success" />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-success">{totalStock}</div>
+          <CardContent className="px-4 pb-4">
+            <div className="text-xl sm:text-2xl font-bold text-success">{totalStock}</div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Productos Base</CardTitle>
+        <Card className="col-span-2 lg:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 px-4 pt-4">
+            <CardTitle className="text-xs sm:text-sm font-medium">Productos Base</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <CardContent className="px-4 pb-4">
+            <div className="text-xl sm:text-2xl font-bold">
               {new Set(variaciones?.map(v => v.producto?.id)).size}
             </div>
           </CardContent>
         </Card>
       </div>
 
+      {/* Variaciones List */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <CardHeader className="px-4 sm:px-6">
+          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
             <Package className="h-5 w-5" />
             Stock por Variación
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-4 sm:px-6">
           {variaciones && variaciones.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>IMEI</TableHead>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>Tipo Talla</TableHead>
-                  <TableHead>Talla</TableHead>
-                  <TableHead>Precio</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead className="w-[100px]">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {variaciones.map((v: any) => (
-                  <TableRow key={v.id}>
-                    <TableCell className="font-mono text-sm">{v.producto?.imei}</TableCell>
-                    <TableCell className="font-medium">{v.producto?.nombre}</TableCell>
-                    <TableCell>{v.tipo_talla?.nombre}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{v.talla}</Badge>
-                    </TableCell>
-                    <TableCell>S/ {(v.precio || 0).toFixed(2)}</TableCell>
-                    <TableCell>
-                      <Badge variant={v.stock_disponible > 0 ? "default" : "secondary"}>
-                        {v.stock_disponible}
+            <div className="space-y-3">
+              {variaciones.map((v: any) => (
+                <div 
+                  key={v.id} 
+                  className="border rounded-lg p-4 bg-card hover:bg-accent/5 transition-colors"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="font-mono text-xs shrink-0">
+                          {v.producto?.imei}
+                        </Badge>
+                        <span className="font-medium text-sm sm:text-base truncate">
+                          {v.producto?.nombre}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {v.tipo_talla?.nombre}: {v.talla}
+                        </Badge>
+                        <span className="text-sm text-muted-foreground">
+                          S/ {(v.precio || 0).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0">
+                      <Badge 
+                        variant={v.stock_disponible > 0 ? "default" : "secondary"}
+                        className="text-sm px-3 py-1"
+                      >
+                        {v.stock_disponible} unidades
                       </Badge>
-                    </TableCell>
-                    <TableCell>
                       <div className="flex items-center gap-1">
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           onClick={() => openViewDialog(v.id)}
-                          title="Ver unidades"
+                          className="h-9"
                         >
-                          <Eye className="h-4 w-4" />
+                          <Eye className="h-4 w-4 sm:mr-1" />
+                          <span className="hidden sm:inline">Ver QRs</span>
                         </Button>
                         {canManageProducts && (
                           <Button
-                            variant="ghost"
+                            variant="default"
                             size="sm"
                             onClick={() => openDialog(v.id)}
-                            title="Agregar unidades"
+                            className="h-9"
                           >
-                            <Plus className="h-4 w-4" />
+                            <Plus className="h-4 w-4 sm:mr-1" />
+                            <span className="hidden sm:inline">Agregar</span>
                           </Button>
                         )}
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              No hay variaciones registradas. Primero cree productos con variaciones.
+            <div className="text-center py-12 text-muted-foreground">
+              <Package className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <p>No hay variaciones registradas</p>
+              <p className="text-sm mt-1">Crea productos y variaciones primero</p>
             </div>
           )}
         </CardContent>
