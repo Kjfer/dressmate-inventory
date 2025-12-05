@@ -7,6 +7,7 @@ import {
   Truck,
   Users,
   Search,
+  QrCode,
   LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,6 +36,7 @@ const menuItems: MenuItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Buscar", url: "/buscar", icon: Search },
   { title: "Productos", url: "/productos", icon: Package },
+  { title: "Stock / QR", url: "/productos/stock", icon: QrCode },
   { title: "Pedidos", url: "/pedidos", icon: ShoppingCart },
   { title: "Viajes", url: "/viajes", icon: Truck },
   { title: "Motorizados", url: "/motorizados", icon: Users, requireAdmin: true },
