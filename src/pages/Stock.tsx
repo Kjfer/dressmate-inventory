@@ -25,28 +25,22 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
-import { Plus, QrCode, Package, Loader2 } from "lucide-react";
+import { Plus, QrCode, Package, Loader2, ChevronDown, ChevronRight, Eye, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
-interface StockForm {
-  producto_id: string;
-  tipo_talla_id: string;
-  talla: string;
+interface AddUnidadesForm {
+  variacion_id: string;
   cantidad: number;
-  precio: number;
 }
-
-const initialForm: StockForm = {
-  producto_id: "",
-  tipo_talla_id: "",
-  talla: "",
-  cantidad: 1,
-  precio: 0,
-};
 
 const Stock = () => {
   const { toast } = useToast();
@@ -54,45 +48,22 @@ const Stock = () => {
   const queryClient = useQueryClient();
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [form, setForm] = useState<StockForm>(initialForm);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [selectedVariacionId, setSelectedVariacionId] = useState<string | null>(null);
+  const [form, setForm] = useState<AddUnidadesForm>({ variacion_id: "", cantidad: 1 });
+  const [expandedVariaciones, setExpandedVariaciones] = useState<Set<string>>(new Set());
 
-  // Fetch productos
-  const { data: productos } = useQuery({
-    queryKey: ['productos'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('productos')
-        .select('id, imei, nombre')
-        .order('imei');
-      if (error) throw error;
-      return data;
-    }
-  });
-
-  // Fetch tipo_tallas
-  const { data: tipoTallas } = useQuery({
-    queryKey: ['tipo-tallas'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('tipo_tallas')
-        .select('*')
-        .order('nombre');
-      if (error) throw error;
-      return data;
-    }
-  });
-
-  // Fetch variaciones with stock
+  // Fetch variaciones with producto info
   const { data: variaciones, isLoading } = useQuery({
-    queryKey: ['variaciones-stock'],
+    queryKey: ['variaciones-con-productos'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('variaciones_producto')
         .select(`
           id,
           talla,
-          stock_disponible,
           precio,
+          stock_disponible,
           producto:productos(id, imei, nombre),
           tipo_talla:tipo_tallas(nombre)
         `)
@@ -102,44 +73,28 @@ const Stock = () => {
     }
   });
 
-  // Get selected tipo_talla values
-  const selectedTipoTalla = tipoTallas?.find(t => t.id === form.tipo_talla_id);
-  const tallasDisponibles = selectedTipoTalla?.valores as string[] || [];
+  // Fetch productos individuales for selected variacion
+  const { data: productosIndividuales, isLoading: loadingIndividuales } = useQuery({
+    queryKey: ['productos-individuales', selectedVariacionId],
+    queryFn: async () => {
+      if (!selectedVariacionId) return [];
+      const { data, error } = await supabase
+        .from('productos_individuales')
+        .select('*')
+        .eq('variacion_id', selectedVariacionId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!selectedVariacionId
+  });
 
-  const createMutation = useMutation({
-    mutationFn: async (data: StockForm) => {
-      // 1. Check or create variacion
-      let variacionId: string;
-      
-      const { data: existingVar } = await supabase
-        .from('variaciones_producto')
-        .select('id')
-        .eq('producto_id', data.producto_id)
-        .eq('talla', data.talla)
-        .maybeSingle();
-      
-      if (existingVar) {
-        variacionId = existingVar.id;
-      } else {
-        const { data: newVar, error: varError } = await supabase
-          .from('variaciones_producto')
-          .insert({
-            producto_id: data.producto_id,
-            tipo_talla_id: data.tipo_talla_id,
-            talla: data.talla,
-            precio: data.precio,
-            stock_disponible: 0,
-          })
-          .select()
-          .single();
-        
-        if (varError) throw varError;
-        variacionId = newVar.id;
-      }
-
-      // 2. Create productos_individuales
+  // Create productos individuales mutation
+  const createIndividualesMutation = useMutation({
+    mutationFn: async (data: AddUnidadesForm) => {
+      // Create productos_individuales (QR se genera automáticamente por trigger)
       const individuales = Array.from({ length: data.cantidad }, () => ({
-        variacion_id: variacionId,
+        variacion_id: data.variacion_id,
         qr_code: 'TEMP', // Will be overwritten by trigger
         estado: 'disponible' as const,
       }));
@@ -150,32 +105,25 @@ const Stock = () => {
       
       if (indError) throw indError;
 
-      // 3. Update stock count
-      const { error: stockError } = await supabase
-        .from('variaciones_producto')
-        .update({ 
-          stock_disponible: (existingVar ? 0 : 0) + data.cantidad 
-        })
-        .eq('id', variacionId);
-      
-      // Actually let's recalculate stock properly
+      // Recalculate stock
       const { count } = await supabase
         .from('productos_individuales')
         .select('*', { count: 'exact', head: true })
-        .eq('variacion_id', variacionId)
+        .eq('variacion_id', data.variacion_id)
         .eq('estado', 'disponible');
 
       await supabase
         .from('variaciones_producto')
         .update({ stock_disponible: count || 0 })
-        .eq('id', variacionId);
+        .eq('id', data.variacion_id);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['variaciones-stock'] });
-      queryClient.invalidateQueries({ queryKey: ['variaciones-disponibles'] });
+      queryClient.invalidateQueries({ queryKey: ['variaciones-con-productos'] });
+      queryClient.invalidateQueries({ queryKey: ['productos-individuales'] });
+      queryClient.invalidateQueries({ queryKey: ['productos'] });
       toast({ 
-        title: "Stock generado", 
-        description: `${form.cantidad} unidades creadas con QR automático` 
+        title: "Unidades creadas", 
+        description: `${form.cantidad} unidades físicas creadas con QR automático` 
       });
       closeDialog();
     },
@@ -184,23 +132,106 @@ const Stock = () => {
     }
   });
 
-  const openDialog = () => {
-    setForm(initialForm);
+  // Delete producto individual
+  const deleteIndividualMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { data: producto, error: fetchError } = await supabase
+        .from('productos_individuales')
+        .select('variacion_id, estado')
+        .eq('id', id)
+        .single();
+      
+      if (fetchError) throw fetchError;
+      if (producto.estado !== 'disponible') {
+        throw new Error('Solo se pueden eliminar unidades disponibles');
+      }
+
+      const { error } = await supabase
+        .from('productos_individuales')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+
+      // Recalculate stock
+      const { count } = await supabase
+        .from('productos_individuales')
+        .select('*', { count: 'exact', head: true })
+        .eq('variacion_id', producto.variacion_id)
+        .eq('estado', 'disponible');
+
+      await supabase
+        .from('variaciones_producto')
+        .update({ stock_disponible: count || 0 })
+        .eq('id', producto.variacion_id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['variaciones-con-productos'] });
+      queryClient.invalidateQueries({ queryKey: ['productos-individuales'] });
+      toast({ title: "Unidad eliminada" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  });
+
+  const openDialog = (variacionId?: string) => {
+    setForm({ variacion_id: variacionId || "", cantidad: 1 });
     setIsDialogOpen(true);
   };
 
   const closeDialog = () => {
     setIsDialogOpen(false);
-    setForm(initialForm);
+    setForm({ variacion_id: "", cantidad: 1 });
+  };
+
+  const openViewDialog = (variacionId: string) => {
+    setSelectedVariacionId(variacionId);
+    setIsViewDialogOpen(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.producto_id || !form.tipo_talla_id || !form.talla || form.cantidad < 1) {
-      toast({ title: "Error", description: "Complete todos los campos", variant: "destructive" });
+    if (!form.variacion_id || form.cantidad < 1) {
+      toast({ title: "Error", description: "Seleccione una variación y cantidad válida", variant: "destructive" });
       return;
     }
-    createMutation.mutate(form);
+    createIndividualesMutation.mutate(form);
+  };
+
+  const handleDeleteIndividual = (id: string) => {
+    if (confirm("¿Está seguro de eliminar esta unidad?")) {
+      deleteIndividualMutation.mutate(id);
+    }
+  };
+
+  const toggleExpand = (variacionId: string) => {
+    const newExpanded = new Set(expandedVariaciones);
+    if (newExpanded.has(variacionId)) {
+      newExpanded.delete(variacionId);
+    } else {
+      newExpanded.add(variacionId);
+    }
+    setExpandedVariaciones(newExpanded);
+  };
+
+  const getEstadoColor = (estado: string) => {
+    switch (estado) {
+      case 'disponible': return 'bg-success/10 text-success border-success/20';
+      case 'en_transito': return 'bg-warning/10 text-warning border-warning/20';
+      case 'fuera_stock': return 'bg-destructive/10 text-destructive border-destructive/20';
+      default: return 'bg-muted';
+    }
+  };
+
+  const getEstadoLabel = (estado: string) => {
+    switch (estado) {
+      case 'disponible': return 'Disponible';
+      case 'en_transito': return 'En tránsito';
+      case 'fuera_stock': return 'Fuera de stock';
+      case 'devuelto': return 'Devuelto';
+      default: return estado;
+    }
   };
 
   const totalStock = variaciones?.reduce((sum, v) => sum + v.stock_disponible, 0) || 0;
@@ -213,28 +244,30 @@ const Stock = () => {
     );
   }
 
+  const selectedVariacion = variaciones?.find(v => v.id === selectedVariacionId);
+
   return (
     <div className="space-y-6">
-      {/* Generate Stock Dialog */}
+      {/* Add Units Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Generar Stock por Talla</DialogTitle>
+            <DialogTitle>Agregar Unidades Físicas</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label>Producto *</Label>
+              <Label>Variación (Producto - Talla) *</Label>
               <Select 
-                value={form.producto_id} 
-                onValueChange={(v) => setForm(prev => ({ ...prev, producto_id: v }))}
+                value={form.variacion_id} 
+                onValueChange={(v) => setForm(prev => ({ ...prev, variacion_id: v }))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar producto..." />
+                  <SelectValue placeholder="Seleccionar variación..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {productos?.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.imei} - {p.nombre}
+                  {variaciones?.map((v: any) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      {v.producto?.imei} - {v.producto?.nombre} ({v.talla})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -242,79 +275,101 @@ const Stock = () => {
             </div>
 
             <div className="space-y-2">
-              <Label>Tipo de Talla *</Label>
-              <Select 
-                value={form.tipo_talla_id} 
-                onValueChange={(v) => setForm(prev => ({ ...prev, tipo_talla_id: v, talla: "" }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar tipo..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {tipoTallas?.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Cantidad de Unidades *</Label>
+              <Input
+                type="number"
+                min="1"
+                value={form.cantidad}
+                onChange={(e) => setForm(prev => ({ ...prev, cantidad: parseInt(e.target.value) || 1 }))}
+              />
+              <p className="text-xs text-muted-foreground">
+                Se generará un código QR único para cada unidad
+              </p>
             </div>
-
-            {form.tipo_talla_id && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Talla *</Label>
-                  <Select 
-                    value={form.talla} 
-                    onValueChange={(v) => setForm(prev => ({ ...prev, talla: v }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tallasDisponibles.map((t) => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Cantidad *</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={form.cantidad}
-                    onChange={(e) => setForm(prev => ({ ...prev, cantidad: parseInt(e.target.value) || 1 }))}
-                  />
-                </div>
-              </div>
-            )}
-
-            {form.tipo_talla_id && (
-              <div className="space-y-2">
-                <Label>Precio de Alquiler (S/)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.precio}
-                  onChange={(e) => setForm(prev => ({ ...prev, precio: parseFloat(e.target.value) || 0 }))}
-                  placeholder="0.00"
-                />
-              </div>
-            )}
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeDialog}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Generar Stock
+              <Button type="submit" disabled={createIndividualesMutation.isPending}>
+                {createIndividualesMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Crear Unidades
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Individual Products Dialog */}
+      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <QrCode className="h-5 w-5" />
+              Unidades Físicas - {selectedVariacion?.producto?.nombre} ({selectedVariacion?.talla})
+            </DialogTitle>
+          </DialogHeader>
+          
+          {loadingIndividuales ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : productosIndividuales && productosIndividuales.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Código QR</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Entallado</TableHead>
+                  <TableHead>Creado</TableHead>
+                  {canManageProducts && <TableHead className="w-[60px]"></TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {productosIndividuales.map((pi) => (
+                  <TableRow key={pi.id}>
+                    <TableCell className="font-mono text-sm font-medium">{pi.qr_code}</TableCell>
+                    <TableCell>
+                      <Badge className={getEstadoColor(pi.estado)}>
+                        {getEstadoLabel(pi.estado)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{pi.entallado ? 'Sí' : 'No'}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {new Date(pi.created_at).toLocaleDateString()}
+                    </TableCell>
+                    {canManageProducts && (
+                      <TableCell>
+                        {pi.estado === 'disponible' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteIndividual(pi.id)}
+                            disabled={deleteIndividualMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No hay unidades físicas para esta variación
+            </div>
+          )}
+
+          <DialogFooter>
+            {canManageProducts && selectedVariacionId && (
+              <Button onClick={() => { setIsViewDialogOpen(false); openDialog(selectedVariacionId); }}>
+                <Plus className="h-4 w-4 mr-2" />
+                Agregar Unidades
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -322,13 +377,13 @@ const Stock = () => {
         <div>
           <h1 className="text-3xl font-bold">Gestión de Stock</h1>
           <p className="text-muted-foreground mt-1">
-            Administrar variaciones y unidades individuales
+            Administrar unidades físicas y códigos QR
           </p>
         </div>
         {canManageProducts && (
-          <Button onClick={openDialog}>
+          <Button onClick={() => openDialog()}>
             <Plus className="h-4 w-4 mr-2" />
-            Generar Stock
+            Agregar Unidades
           </Button>
         )}
       </div>
@@ -355,10 +410,12 @@ const Stock = () => {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Productos</CardTitle>
+            <CardTitle className="text-sm font-medium">Productos Base</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{productos?.length || 0}</div>
+            <div className="text-2xl font-bold">
+              {new Set(variaciones?.map(v => v.producto?.id)).size}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -380,7 +437,8 @@ const Stock = () => {
                   <TableHead>Tipo Talla</TableHead>
                   <TableHead>Talla</TableHead>
                   <TableHead>Precio</TableHead>
-                  <TableHead>Stock Disponible</TableHead>
+                  <TableHead>Stock</TableHead>
+                  <TableHead className="w-[100px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -398,13 +456,35 @@ const Stock = () => {
                         {v.stock_disponible}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openViewDialog(v.id)}
+                          title="Ver unidades"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        {canManageProducts && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openDialog(v.id)}
+                            title="Agregar unidades"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
-              No hay variaciones registradas
+              No hay variaciones registradas. Primero cree productos con variaciones.
             </div>
           )}
         </CardContent>
