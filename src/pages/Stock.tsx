@@ -18,11 +18,12 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Plus, QrCode, Package, Loader2, Eye, Trash2, X } from "lucide-react";
+import { Plus, QrCode, Package, Loader2, Eye, Trash2, Printer } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { QRPrintModal } from "@/components/QRPrintModal";
 
 interface AddUnidadesForm {
   variacion_id: string;
@@ -36,6 +37,7 @@ const Stock = () => {
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [selectedVariacionId, setSelectedVariacionId] = useState<string | null>(null);
   const [form, setForm] = useState<AddUnidadesForm>({ variacion_id: "", cantidad: 1 });
 
@@ -60,7 +62,7 @@ const Stock = () => {
   });
 
   // Fetch productos individuales for selected variacion
-  const { data: productosIndividuales, isLoading: loadingIndividuales } = useQuery({
+  const { data: productosIndividuales, isLoading: loadingIndividuales, refetch: refetchIndividuales } = useQuery({
     queryKey: ['productos-individuales', selectedVariacionId],
     queryFn: async () => {
       if (!selectedVariacionId) return [];
@@ -171,6 +173,15 @@ const Stock = () => {
   const openViewDialog = (variacionId: string) => {
     setSelectedVariacionId(variacionId);
     setIsViewDialogOpen(true);
+  };
+
+  const openPrintModal = async (variacionId: string) => {
+    setSelectedVariacionId(variacionId);
+    // Wait a tick for state to update then refetch
+    setTimeout(() => {
+      refetchIndividuales();
+    }, 0);
+    setIsPrintModalOpen(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -335,6 +346,16 @@ const Stock = () => {
           </div>
 
           <DialogFooter className="shrink-0 pt-4 border-t flex-col sm:flex-row gap-2">
+            {productosIndividuales && productosIndividuales.length > 0 && (
+              <Button 
+                variant="outline" 
+                onClick={() => { setIsViewDialogOpen(false); openPrintModal(selectedVariacionId!); }}
+                className="w-full sm:w-auto"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                Imprimir QRs
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setIsViewDialogOpen(false)} className="w-full sm:w-auto">
               Cerrar
             </Button>
@@ -350,6 +371,19 @@ const Stock = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* QR Print Modal */}
+      {selectedVariacion && productosIndividuales && (
+        <QRPrintModal
+          open={isPrintModalOpen}
+          onOpenChange={setIsPrintModalOpen}
+          productos={productosIndividuales}
+          variacionInfo={{
+            producto_nombre: selectedVariacion.producto?.nombre || '',
+            talla: selectedVariacion.talla
+          }}
+        />
+      )}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
@@ -435,12 +469,12 @@ const Stock = () => {
                       </div>
                     </div>
                     
-                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0">
+                    <div className="flex items-center justify-between sm:justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0">
                       <Badge 
                         variant={v.stock_disponible > 0 ? "default" : "secondary"}
                         className="text-sm px-3 py-1"
                       >
-                        {v.stock_disponible} unidades
+                        {v.stock_disponible} uds
                       </Badge>
                       <div className="flex items-center gap-1">
                         <Button
@@ -448,19 +482,30 @@ const Stock = () => {
                           size="sm"
                           onClick={() => openViewDialog(v.id)}
                           className="h-9"
+                          title="Ver unidades"
                         >
-                          <Eye className="h-4 w-4 sm:mr-1" />
-                          <span className="hidden sm:inline">Ver QRs</span>
+                          <Eye className="h-4 w-4" />
                         </Button>
+                        {v.stock_disponible > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openPrintModal(v.id)}
+                            className="h-9"
+                            title="Imprimir QRs"
+                          >
+                            <Printer className="h-4 w-4" />
+                          </Button>
+                        )}
                         {canManageProducts && (
                           <Button
                             variant="default"
                             size="sm"
                             onClick={() => openDialog(v.id)}
                             className="h-9"
+                            title="Agregar unidades"
                           >
-                            <Plus className="h-4 w-4 sm:mr-1" />
-                            <span className="hidden sm:inline">Agregar</span>
+                            <Plus className="h-4 w-4" />
                           </Button>
                         )}
                       </div>
