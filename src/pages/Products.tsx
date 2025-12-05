@@ -19,11 +19,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Package, Loader2, QrCode, Trash2, Edit } from "lucide-react";
+import { Plus, Package, Loader2, Trash2, Edit, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 import type { Json } from "@/integrations/supabase/types";
 
 interface TipoTalla {
@@ -35,7 +36,6 @@ interface TipoTalla {
 interface VariacionInput {
   tipoTallaId: string;
   talla: string;
-  cantidad: number;
   precio: number;
 }
 
@@ -57,11 +57,15 @@ const Products = () => {
   const { toast } = useToast();
   const { canManageProducts } = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isVariacionDialogOpen, setIsVariacionDialogOpen] = useState(false);
+  const [selectedProductoId, setSelectedProductoId] = useState<string | null>(null);
   const [formData, setFormData] = useState<ProductForm>(initialForm);
   const [variaciones, setVariaciones] = useState<VariacionInput[]>([]);
   const [selectedTipoTalla, setSelectedTipoTalla] = useState<string>("");
+  const [newVariacion, setNewVariacion] = useState<VariacionInput>({ tipoTallaId: "", talla: "", precio: 0 });
 
   // Fetch tipo_tallas
   const { data: tipoTallas } = useQuery({
@@ -89,6 +93,7 @@ const Products = () => {
           variaciones_producto (
             id,
             talla,
+            precio,
             stock_disponible,
             tipo_talla:tipo_tallas (nombre)
           )
@@ -99,14 +104,11 @@ const Products = () => {
     }
   });
 
-  // Create producto mutation
+  // Create producto mutation (solo producto base)
   const createProducto = useMutation({
     mutationFn: async () => {
       if (!formData.imei || !formData.nombre) {
         throw new Error("IMEI y nombre son requeridos");
-      }
-      if (variaciones.length === 0) {
-        throw new Error("Debe agregar al menos una variación de talla");
       }
 
       const { data: producto, error: productoError } = await supabase
@@ -122,32 +124,19 @@ const Products = () => {
 
       if (productoError) throw productoError;
 
+      // Crear variaciones si se agregaron
       for (const variacion of variaciones) {
-        const { data: variacionData, error: variacionError } = await supabase
+        const { error: variacionError } = await supabase
           .from('variaciones_producto')
           .insert({
             producto_id: producto.id,
             tipo_talla_id: variacion.tipoTallaId,
             talla: variacion.talla,
-            stock_disponible: variacion.cantidad,
+            stock_disponible: 0,
             precio: variacion.precio,
-          })
-          .select()
-          .single();
+          });
 
         if (variacionError) throw variacionError;
-
-        const individuales = Array.from({ length: variacion.cantidad }, () => ({
-          variacion_id: variacionData.id,
-          estado: 'disponible' as const,
-          qr_code: 'TEMP',
-        }));
-
-        const { error: individualesError } = await supabase
-          .from('productos_individuales')
-          .insert(individuales);
-
-        if (individualesError) throw individualesError;
       }
 
       return producto;
@@ -155,9 +144,35 @@ const Products = () => {
     onSuccess: (producto) => {
       toast({
         title: "Producto Creado",
-        description: `${producto.nombre} con ${variaciones.reduce((acc, v) => acc + v.cantidad, 0)} unidades`,
+        description: `${producto.nombre} creado. Ahora puede agregar unidades individuales desde Stock.`,
       });
       closeDialog();
+      queryClient.invalidateQueries({ queryKey: ['productos'] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  });
+
+  // Add variacion to existing producto
+  const addVariacionMutation = useMutation({
+    mutationFn: async ({ productoId, variacion }: { productoId: string; variacion: VariacionInput }) => {
+      const { error } = await supabase
+        .from('variaciones_producto')
+        .insert({
+          producto_id: productoId,
+          tipo_talla_id: variacion.tipoTallaId,
+          talla: variacion.talla,
+          stock_disponible: 0,
+          precio: variacion.precio,
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({ title: "Variación agregada", description: "Ahora puede agregar unidades desde Stock" });
+      setIsVariacionDialogOpen(false);
+      setNewVariacion({ tipoTallaId: "", talla: "", precio: 0 });
       queryClient.invalidateQueries({ queryKey: ['productos'] });
     },
     onError: (error: Error) => {
@@ -193,30 +208,23 @@ const Products = () => {
     setSelectedTipoTalla("");
   };
 
+  const openVariacionDialog = (productoId: string) => {
+    setSelectedProductoId(productoId);
+    setNewVariacion({ tipoTallaId: "", talla: "", precio: 0 });
+    setIsVariacionDialogOpen(true);
+  };
+
   const addVariacion = (talla: string) => {
     if (!selectedTipoTalla) return;
     
     const exists = variaciones.find(v => v.tipoTallaId === selectedTipoTalla && v.talla === talla);
-    if (exists) {
-      setVariaciones(variaciones.map(v => 
-        v.tipoTallaId === selectedTipoTalla && v.talla === talla 
-          ? { ...v, cantidad: v.cantidad + 1 }
-          : v
-      ));
-    } else {
-      setVariaciones([...variaciones, { tipoTallaId: selectedTipoTalla, talla, cantidad: 1, precio: 0 }]);
+    if (!exists) {
+      setVariaciones([...variaciones, { tipoTallaId: selectedTipoTalla, talla, precio: 0 }]);
     }
   };
 
   const removeVariacion = (tipoTallaId: string, talla: string) => {
     setVariaciones(variaciones.filter(v => !(v.tipoTallaId === tipoTallaId && v.talla === talla)));
-  };
-
-  const updateCantidad = (tipoTallaId: string, talla: string, cantidad: number) => {
-    if (cantidad < 1) return;
-    setVariaciones(variaciones.map(v => 
-      v.tipoTallaId === tipoTallaId && v.talla === talla ? { ...v, cantidad } : v
-    ));
   };
 
   const updatePrecio = (tipoTallaId: string, talla: string, precio: number) => {
@@ -226,25 +234,29 @@ const Products = () => {
   };
 
   const selectedTipoTallaData = tipoTallas?.find(t => t.id === selectedTipoTalla);
+  const newTipoTallaData = tipoTallas?.find(t => t.id === newVariacion.tipoTallaId);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     createProducto.mutate();
   };
 
+  const handleAddVariacion = () => {
+    if (!selectedProductoId || !newVariacion.tipoTallaId || !newVariacion.talla) return;
+    addVariacionMutation.mutate({ productoId: selectedProductoId, variacion: newVariacion });
+  };
+
   const handleDelete = (id: string) => {
-    if (confirm("¿Está seguro de eliminar este producto?")) {
+    if (confirm("¿Está seguro de eliminar este producto y todas sus variaciones?")) {
       deleteProducto.mutate(id);
     }
   };
 
-  const totalStock = productos?.reduce((sum, p) => 
-    sum + (p.variaciones_producto?.reduce((s: number, v: any) => s + v.stock_disponible, 0) || 0), 0
-  ) || 0;
+  const totalVariaciones = productos?.reduce((sum, p) => sum + (p.variaciones_producto?.length || 0), 0) || 0;
 
   return (
     <div className="space-y-6">
-      {/* Create Dialog */}
+      {/* Create Product Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -294,7 +306,10 @@ const Products = () => {
 
             {/* Variaciones */}
             <div className="space-y-3 border-t pt-4">
-              <Label>Variaciones de Talla *</Label>
+              <Label>Variaciones de Talla (Opcional)</Label>
+              <p className="text-sm text-muted-foreground">
+                Puede agregar variaciones ahora o después desde la lista de productos
+              </p>
               
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground">Tipo de Talla</Label>
@@ -334,15 +349,6 @@ const Products = () => {
                       <div key={`${v.tipoTallaId}-${v.talla}`} className="flex items-center gap-2 bg-muted/50 p-2 rounded flex-wrap">
                         <Badge variant="secondary">{tipoNombre}</Badge>
                         <span className="font-medium">{v.talla}</span>
-                        <span className="text-muted-foreground">×</span>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={v.cantidad}
-                          onChange={(e) => updateCantidad(v.tipoTallaId, v.talla, parseInt(e.target.value) || 1)}
-                          className="w-16 h-8"
-                        />
-                        <span className="text-sm text-muted-foreground">uds</span>
                         <span className="text-muted-foreground">|</span>
                         <span className="text-sm">S/</span>
                         <Input
@@ -365,9 +371,6 @@ const Products = () => {
                       </div>
                     );
                   })}
-                  <p className="text-sm text-muted-foreground">
-                    Total: {variaciones.reduce((acc, v) => acc + v.cantidad, 0)} unidades (QR automático)
-                  </p>
                 </div>
               )}
             </div>
@@ -376,7 +379,7 @@ const Products = () => {
               <Button type="button" variant="outline" onClick={closeDialog}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={createProducto.isPending || variaciones.length === 0}>
+              <Button type="submit" disabled={createProducto.isPending}>
                 {createProducto.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Crear Producto
               </Button>
@@ -385,11 +388,81 @@ const Products = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Add Variacion to Existing Product Dialog */}
+      <Dialog open={isVariacionDialogOpen} onOpenChange={setIsVariacionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Agregar Variación de Talla</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Tipo de Talla *</Label>
+              <Select 
+                value={newVariacion.tipoTallaId} 
+                onValueChange={(v) => setNewVariacion({ ...newVariacion, tipoTallaId: v, talla: "" })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar tipo" />
+                </SelectTrigger>
+                <SelectContent>
+                  {tipoTallas?.map(tipo => (
+                    <SelectItem key={tipo.id} value={tipo.id}>{tipo.nombre}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {newTipoTallaData && (
+              <div className="space-y-2">
+                <Label>Talla *</Label>
+                <Select 
+                  value={newVariacion.talla} 
+                  onValueChange={(v) => setNewVariacion({ ...newVariacion, talla: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar talla" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {newTipoTallaData.valores.map(talla => (
+                      <SelectItem key={talla} value={talla}>{talla}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Precio de Alquiler (S/)</Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={newVariacion.precio}
+                onChange={(e) => setNewVariacion({ ...newVariacion, precio: parseFloat(e.target.value) || 0 })}
+                placeholder="0.00"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsVariacionDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleAddVariacion} 
+              disabled={!newVariacion.tipoTallaId || !newVariacion.talla || addVariacionMutation.isPending}
+            >
+              {addVariacionMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Agregar Variación
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Gestión de Productos</h1>
           <p className="text-muted-foreground mt-1">
-            Crear y administrar productos del catálogo
+            Crear productos y variaciones por talla
           </p>
         </div>
         {canManageProducts && (
@@ -401,7 +474,7 @@ const Products = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Productos</CardTitle>
@@ -416,18 +489,7 @@ const Products = () => {
             <CardTitle className="text-sm font-medium">Variaciones</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {productos?.reduce((sum, p) => sum + (p.variaciones_producto?.length || 0), 0) || 0}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Stock Total</CardTitle>
-            <QrCode className="h-4 w-4 text-success" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-success">{totalStock}</div>
+            <div className="text-2xl font-bold">{totalVariaciones}</div>
           </CardContent>
         </Card>
       </div>
@@ -436,7 +498,7 @@ const Products = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Package className="h-5 w-5" />
-            Productos Existentes
+            Catálogo de Productos
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -457,25 +519,48 @@ const Products = () => {
                       {producto.descripcion && (
                         <p className="text-sm text-muted-foreground mt-1">{producto.descripcion}</p>
                       )}
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {producto.variaciones_producto?.map((v: any) => (
-                          <Badge key={v.id} variant="secondary" className="flex items-center gap-1">
-                            <QrCode className="h-3 w-3" />
-                            {v.talla} ({v.stock_disponible})
-                          </Badge>
-                        ))}
+                      
+                      {/* Variaciones */}
+                      <div className="mt-3">
+                        <p className="text-xs text-muted-foreground mb-2">Variaciones:</p>
+                        {producto.variaciones_producto && producto.variaciones_producto.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {producto.variaciones_producto.map((v: any) => (
+                              <Badge key={v.id} variant="secondary" className="flex items-center gap-1">
+                                {v.talla} - S/{v.precio?.toFixed(2)} 
+                                <span className="text-xs opacity-70">({v.stock_disponible} uds)</span>
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground italic">Sin variaciones</p>
+                        )}
                       </div>
                     </div>
-                    {canManageProducts && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(producto.id)}
-                        disabled={deleteProducto.isPending}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    )}
+                    
+                    <div className="flex items-center gap-1">
+                      {canManageProducts && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openVariacionDialog(producto.id)}
+                            title="Agregar variación"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(producto.id)}
+                            disabled={deleteProducto.isPending}
+                            title="Eliminar producto"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
